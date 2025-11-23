@@ -55,6 +55,8 @@
     <div id="root"></div>
 
     <script type="text/babel" data-presets="react">
+      console.log('[winter] app script starting');
+
       /* global React, ReactDOM, supabase */
       const { useState, useMemo, useEffect, useRef } = React;
 
@@ -306,20 +308,32 @@
         useEffect(()=>{ 
           let cancelled=false;
           async function boot(){
+            console.log('[winter] boot starting');
             try{
-              if(!(window.supabase && window.supabase.createClient)){ setTimeout(boot,250); return; }
+              if(!(window.supabase && window.supabase.createClient)){
+                console.log('[winter] supabase not ready yet, retry');
+                setTimeout(boot,250);
+                return;
+              }
               const c = window.supabase.createClient(defaultURL, defaultKEY, { auth:{ persistSession:false }});
               if(cancelled) return;
+              console.log('[winter] client created');
               setClient(c);
               const probe = await c.from('winter_league_standings').select('name').limit(1);
               if(cancelled) return;
-              if(probe.error){ setStatusMsg('Error: '+probe.error.message); }
-              else{
+              if(probe.error){
+                console.error('[winter] probe error:', probe.error);
+                setStatusMsg('Error: '+probe.error.message);
+              } else {
+                console.log('[winter] probe ok, calling refreshShared + fetchSeasonWith');
                 setStatusMsg('Connected');
                 await refreshShared(c);
                 await fetchSeasonWith(c);
               }
-            }catch(e){ if(!cancelled) setStatusMsg('Error: '+(e?.message||e)); }
+            }catch(e){
+              console.error('[winter] boot exception', e);
+              if(!cancelled) setStatusMsg('Error: '+(e?.message||e));
+            }
           }
           boot();
           return ()=>{cancelled=true};
@@ -328,7 +342,10 @@
         // DEBUGGING VERSION
         async function refreshShared(c){
           c = c || client;
-          if (!c) return;
+          if (!c){ 
+            console.warn('[refreshShared] no client yet');
+            return;
+          }
 
           console.log('[refreshShared] BUCKET =', BUCKET, 'PREFIX =', PREFIX);
 
@@ -341,6 +358,7 @@
           if (r.error) {
             console.error('Storage list error:', r.error);
             toast('Storage error: ' + r.error.message);
+            setStatusMsg('Connected – storage error: '+r.error.message);
             return;
           }
 
@@ -357,6 +375,7 @@
 
           console.log('[refreshShared] filtered files:', data);
 
+          setStatusMsg(`Connected – found ${data.length} CSV in winter_league/${PREFIX}`);
           setShared(data);
           setSharedGroups(groupByYear(data));
         }
@@ -426,7 +445,11 @@
         async function fetchSeasonWith(c){
           const r = await c.from('winter_league_standings')
             .select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
-          if(r.error){ setStatusMsg('Error: '+r.error.message); return; }
+          if(r.error){
+            console.error('[winter] fetchSeason error', r.error);
+            setStatusMsg('Error: '+r.error.message);
+            return;
+          }
           const data=r.data||[]; const map={};
           for(const rec of data){
             if(isTeamLike(rec.name)) continue;
