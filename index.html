@@ -325,16 +325,38 @@
           return ()=>{cancelled=true};
         },[]);
 
+        // DEBUGGING VERSION
         async function refreshShared(c){
-          c=c||client; if(!c) return;
-          const r = await c.storage.from(BUCKET).list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
-          if(r.error){
-            console.error('Storage list error', r.error);
+          c = c || client;
+          if (!c) return;
+
+          console.log('[refreshShared] BUCKET =', BUCKET, 'PREFIX =', PREFIX);
+
+          const r = await c.storage
+            .from(BUCKET)
+            .list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
+
+          console.log('[refreshShared] raw result:', r);
+
+          if (r.error) {
+            console.error('Storage list error:', r.error);
+            toast('Storage error: ' + r.error.message);
             return;
           }
+
           const data=(r.data||[])
-            .filter(x=>!x.name.startsWith('.') && /\.csv$/i.test(x.name))
-            .map(x=>({ name:x.name.replace(/\.csv$/i,''), file:x.name, path: PREFIX+'/'+x.name }));
+            .filter(x=>{
+              console.log('[refreshShared] candidate entry:', x);
+              return !x.name.startsWith('.') && /\.csv$/i.test(x.name);
+            })
+            .map(x=>({
+              name:x.name.replace(/\.csv$/i,''),
+              file:x.name,
+              path: PREFIX+'/'+x.name
+            }));
+
+          console.log('[refreshShared] filtered files:', data);
+
           setShared(data);
           setSharedGroups(groupByYear(data));
         }
@@ -975,4 +997,3 @@
     </script>
   </body>
 </html>
-
