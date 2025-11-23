@@ -78,13 +78,11 @@
         }catch{}
       }
 
-      // Default pars
       const COURSE_DEFAULT_MEN   = [4,4,3,4,5,4,3,4,4, 4,5,4,3,4,4,5,3,4];
       const COURSE_DEFAULT_WOMEN = [4,4,3,4,5,4,3,4,4, 4,4,5,3,4,4,5,3,4];
 
-      // Header-ish / non-player names
       const isTeamLike = name => {
-        const s = (name || '').trim();
+        const s=(name||'').trim();
         return (
           /^players?$/i.test(s) ||
           /^team(\s*\d+)?$/i.test(s) ||
@@ -137,18 +135,15 @@
         for (let j = start + 2; j < row.length && vals.length < 18; j++) {
           const raw = String(row[j] || '').trim();
           if (!raw) continue;
-
           if (raw === 'P' || raw === 'p' || raw === '\\') {
             vals.push(0);
             continue;
           }
-
           const n = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
           if (Number.isFinite(n) && n >= 0 && n <= 6) {
             vals.push(n);
           }
         }
-
         while (vals.length < 18) vals.push(0);
         return vals.slice(0, 18);
       }
@@ -157,7 +152,7 @@
         const rows = text.replace(/\r/g,'').split('\n');
         const lines = rows.map(splitSmart);
 
-        // ---- find par row ----
+        // Par row (if present)
         let parsedPars = null;
         for (let i = 0; i < lines.length; i++) {
           const row = lines[i];
@@ -183,162 +178,87 @@
           parsedPars = COURSE_DEFAULT_MEN.slice();
         }
 
-        // ---- roster ----
-        let playerHeaderRow = -1;
-        for (let i = 0; i < lines.length; i++) {
-          if ((lines[i][0] || '') === 'Name' && (lines[i][1] || '') === 'Hdcp') {
-            playerHeaderRow = i;
-            break;
+        // Roster
+        let playerHeaderRow=-1;
+        for(let i=0;i<lines.length;i++){
+          if((lines[i][0]||'')==='Name' && (lines[i][1]||'')==='Hdcp'){ playerHeaderRow=i; break; }
+        }
+        const players=[];
+        if(playerHeaderRow>=0){
+          for(let i=playerHeaderRow+1;i<lines.length;i++){
+            const name=(lines[i][0]||'').trim();
+            if(!name) break;
+            if(isTeamLike(name)) continue;
+            if(/^player$/i.test(name)) continue;
+            const hcap=parseFloat((lines[i][1]||'').trim());
+            if(!Number.isNaN(hcap)) players.push({name,handicap:hcap,gender:'M'});
           }
         }
 
-        const players = [];
+        // Gender hints
+        const genderMap={};
+        for(let r=0;r<lines.length;r++){
+          const row=lines[r];
+          const nm=(row[0]||'').trim(); if(!nm) continue;
+          const tee=String(row[1]||'').toLowerCase();
+          if(/women|ladies|red tee/.test(tee)) genderMap[nm]='F';
+          else if(genderMap[nm]==null) genderMap[nm]='M';
+        }
+        for(const p of players){
+          if(genderMap[p.name]) p.gender=genderMap[p.name];
+        }
 
-        if (playerHeaderRow >= 0) {
-          for (let i = playerHeaderRow + 1; i < lines.length; i++) {
-            const row = lines[i];
-            if (!row) break;
-
-            const name = (row[0] || '').trim();
-            if (!name) break;
-            if (isTeamLike(name)) continue;
-            if (/^player$/i.test(name)) continue;
-
-            const hcap = parseFloat((row[1] || '').trim());
-            if (!Number.isNaN(hcap)) {
-              players.push({ name, handicap: hcap, gender: 'M' });
+        // Totals under a "Stableford" header
+        let totalsStart=-1;
+        for(let i=0;i<lines.length;i++){
+          if(/^stableford$/i.test((lines[i][0]||'').trim())) { totalsStart=i; break; }
+        }
+        const totals={};
+        if(totalsStart>=0){
+          for(let i=totalsStart+1;i<lines.length;i++){
+            const row=lines[i];
+            const a=(row[0]||'').trim();
+            const b=toNum(row[1]);
+            const c=toNum(row[2]);
+            if(!a){ if(i>totalsStart+1) break; else continue; }
+            if(!/[A-Za-z]/.test(a) || a.length<3) continue;
+            const pts=Number.isFinite(c)?c:(Number.isFinite(b)?b:NaN);
+            if(Number.isFinite(pts)) totals[a]=pts;
+            if(!players.some(p=>p.name===a)){
+              players.push({name:a,handicap:0,gender:(genderMap[a]||'M')});
             }
           }
         }
 
-        // ---- gender hints ----
-        const genderMap = {};
-        for (let r = 0; r < lines.length; r++) {
-          const row = lines[r];
-          if (!row) continue;
-          const nm = (row[0] || '').trim();
-          if (!nm) continue;
-          const tee = String(row[1] || '').toLowerCase();
-          if (/women|ladies|red tee/.test(tee)) genderMap[nm] = 'F';
-          else if (genderMap[nm] == null) genderMap[nm] = 'M';
-        }
-        for (const p of players) {
-          if (genderMap[p.name]) p.gender = genderMap[p.name];
-        }
-
-        // ---- Stableford totals table ----
-        let totalsStart = -1;
-        for (let i = 0; i < lines.length; i++) {
-          const first = (lines[i][0] || '').trim().toLowerCase();
-          if (first === 'stableford') {
-            totalsStart = i;
-            break;
-          }
-        }
-
-        const totals = {};
-        if (totalsStart >= 0) {
-          for (let i = totalsStart + 2; i < lines.length; i++) {
-            const row = lines[i];
-            if (!row) break;
-
-            const name = (row[0] || '').trim();
-
-            if (!name || name === '...' || /^round\s*\d+/i.test(name)) break;
-            if (/^player$/i.test(name)) continue;
-            if (isTeamLike(name)) continue;
-            if (!/[A-Za-z]/.test(name)) continue;
-
-            const numeric = [];
-            for (let j = 1; j < row.length; j++) {
-              const v = toNum(row[j]);
-              if (Number.isFinite(v)) numeric.push(v);
-            }
-            if (!numeric.length) continue;
-            const pts = numeric[numeric.length - 1];
-            totals[name] = pts;
-
-            if (!players.some(p => p.name === name)) {
-              players.push({ name, handicap: 0, gender: genderMap[name] || 'M' });
-            }
-          }
-        }
-
-        // ---- per-card data ----
-        const holeData = {};
-        for (let pi = 0; pi < players.length; pi++) {
-          const p = players[pi];
-          let found = false;
-
-          for (let i = 0; i < lines.length - 1; i++) {
-            const row = lines[i];
-            if (!row) continue;
-            if ((row[0] || '').trim() === p.name) {
-              const stRow = lines[i + 1] || [];
-
-              let stIndex = -1;
-              for (let j = 0; j < stRow.length; j++) {
-                if (String(stRow[j]).trim().toLowerCase() === 'stableford') {
-                  stIndex = j;
-                  break;
-                }
+        // Per-hole from cards
+        const holeData={};
+        for(const p of players){
+          for(let i=0;i<lines.length-1;i++){
+            if((lines[i][0]||'').trim()===p.name){
+              const stRow=lines[i+1]||[];
+              let hasStable=false;
+              for(let j=0;j<stRow.length;j++){
+                if(String(stRow[j]).trim().toLowerCase()==='stableford'){ hasStable=true; break; }
               }
-              if (stIndex < 0) continue;
-
-              const perHole = readStablefordPerHole(stRow);
-              const back9 = perHole.slice(9).reduce((a, b) => a + (Number(b) || 0), 0);
-
-              const hcapCard = toNum(stRow[stIndex + 1]);
-              let totalFromCard = NaN;
-              for (let j = stRow.length - 1; j > stIndex; j--) {
-                const v = toNum(stRow[j]);
-                if (Number.isFinite(v)) {
-                  totalFromCard = v;
-                  break;
-                }
-              }
-
-              holeData[p.name] = { perHole, back9, hcapCard, totalFromCard };
-              found = true;
+              if(!hasStable) continue;
+              const perHole=readStablefordPerHole(stRow);
+              const back9=perHole.slice(9).reduce((a,b)=>a+(Number(b)||0),0);
+              holeData[p.name]={perHole, back9};
               break;
             }
           }
-
-          if (!found) {
-            holeData[p.name] = {
-              perHole: Array(18).fill(0),
-              back9: 0,
-              hcapCard: NaN,
-              totalFromCard: NaN
-            };
-          }
+          if(!holeData[p.name]) holeData[p.name]={perHole:Array(18).fill(0), back9:0};
         }
 
         return {
-          players: players.map(p => {
-            const card = holeData[p.name] || {};
-            const hcapCard = card.hcapCard;
-            let handicap = Number.isFinite(p.handicap) ? p.handicap : NaN;
-
-            if (!Number.isFinite(handicap) || handicap <= 0) {
-              handicap = Number.isFinite(hcapCard) ? hcapCard : 0;
-            }
-
-            const ptsSummary = totals[p.name];
-            const cardTotal = card.totalFromCard;
-            let points = 0;
-            if (Number.isFinite(ptsSummary)) points = ptsSummary;
-            else if (Number.isFinite(cardTotal)) points = cardTotal;
-
-            return {
-              name: p.name,
-              gender: p.gender || genderMap[p.name] || 'M',
-              handicap,
-              points,
-              back9: card.back9 || 0,
-              perHole: card.perHole || []
-            };
-          }),
+          players: players.map(p => ({
+            name:p.name,
+            gender:p.gender,
+            handicap:p.handicap,
+            points: totals[p.name] || 0,
+            back9: (holeData[p.name] && holeData[p.name].back9) || 0,
+            perHole: (holeData[p.name] && holeData[p.name].perHole) || []
+          })),
           parsMen: parsedPars,
           parsWomen: parsedPars
         };
@@ -362,13 +282,12 @@
       function App(){
         const [view,setView] = useState('home'); // home | past | event | ratings | standings | eclectic
 
-        // Supabase
         const defaultURL="https://mqknahdfpqxrpgpxqtus.supabase.co";
         const defaultKEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
         const [client,setClient] = useState(null);
         const [statusMsg,setStatusMsg] = useState('Connecting…');
 
-        // bucket + folder (Wednesday Winter League)
+        // WINTER LEAGUE STORAGE
         const BUCKET='winter_league';
         const PREFIX='events';
 
@@ -384,50 +303,35 @@
         });
         const fileInputRef = useRef(null);
 
-        useEffect(()=>{
+        useEffect(()=>{ 
           let cancelled=false;
           async function boot(){
             try{
-              if(!(window.supabase && window.supabase.createClient)){
-                setTimeout(boot,250);
-                return;
-              }
+              if(!(window.supabase && window.supabase.createClient)){ setTimeout(boot,250); return; }
               const c = window.supabase.createClient(defaultURL, defaultKEY, { auth:{ persistSession:false }});
               if(cancelled) return;
               setClient(c);
-
-              // probe winter_league_standings table
               const probe = await c.from('winter_league_standings').select('name').limit(1);
               if(cancelled) return;
-              if(probe.error){
-                setStatusMsg('Error: '+probe.error.message);
-              }else{
+              if(probe.error){ setStatusMsg('Error: '+probe.error.message); }
+              else{
                 setStatusMsg('Connected');
                 await refreshShared(c);
                 await fetchSeasonWith(c);
               }
-            }catch(e){
-              if(!cancelled) setStatusMsg('Error: '+(e?.message||e));
-            }
+            }catch(e){ if(!cancelled) setStatusMsg('Error: '+(e?.message||e)); }
           }
           boot();
           return ()=>{cancelled=true};
         },[]);
 
         async function refreshShared(c){
-          c = c || client;
-          if (!c) return;
-
-          const r = await c.storage
-            .from(BUCKET)
-            .list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
-
-          if (r.error) {
-            console.error('Storage list error:', r.error);
-            toast('Storage error: ' + r.error.message);
+          c=c||client; if(!c) return;
+          const r = await c.storage.from(BUCKET).list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
+          if(r.error){
+            console.error('Storage list error', r.error);
             return;
           }
-
           const data=(r.data||[])
             .filter(x=>!x.name.startsWith('.') && /\.csv$/i.test(x.name))
             .map(x=>({ name:x.name.replace(/\.csv$/i,''), file:x.name, path: PREFIX+'/'+x.name }));
@@ -463,18 +367,8 @@
           toast('Event loaded');
         }
 
-        // computed event outcomes
         const computed = useMemo(()=>{
-          const rows=players.map((p,i)=>({
-            idx:i,
-            name:p.name,
-            gender:p.gender,
-            startExact:p.handicap,
-            points:p.points,
-            back9:p.back9,
-            perHole:p.perHole
-          }));
-
+          const rows=players.map((p,i)=>({idx:i,name:p.name,gender:p.gender,startExact:p.handicap,points:p.points,back9:p.back9,perHole:p.perHole}));
           const base=[...rows].sort((a,b)=>(b.points-a.points)||(compareByCountback(a,b)));
           if(!base.length) return [];
           const groups=[]; const used=new Set();
@@ -484,7 +378,6 @@
             grpIdxs.forEach(id=>used.add(id));
             groups.push(grpIdxs);
           }
-
           const topGroup=groups[0].map(i=>rows.find(r=>r.idx===i));
           let best=[topGroup[0]];
           for(let k=1;k<topGroup.length;k++){
@@ -496,21 +389,12 @@
 
           let pos=1; const out=[];
           for(let gIdx=0; gIdx<groups.length; gIdx++){
-            const g=groups[gIdx];
-            const start=pos;
-            const ptsValue=POINTS_TABLE[start-1]||0;
+            const g=groups[gIdx]; const start=pos; const ptsValue=POINTS_TABLE[start-1]||0;
             for(const i of g){
               const r=rows.find(x=>x.idx===i);
               const isWinner=winnerIdxSet.has(i) && (gIdx===0);
               const res=computeNewExactHandicap(r.startExact,r.gender,r.points,r.back9,isWinner);
-              out.push({
-                ...r,
-                position:start,
-                leaguePoints:ptsValue,
-                isWinner,
-                nextExact:res.nextExact,
-                nextPlaying:res.nextPlaying
-              });
+              out.push({...r, position:start, leaguePoints:ptsValue, isWinner, nextExact:res.nextExact, nextPlaying:res.nextPlaying});
             }
             pos+=g.length;
           }
@@ -518,15 +402,10 @@
         },[players]);
 
         async function fetchSeasonWith(c){
-          const r = await c
-            .from('winter_league_standings')
+          const r = await c.from('winter_league_standings')
             .select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
-          if(r.error){
-            setStatusMsg('Error: '+r.error.message);
-            return;
-          }
-          const data=r.data||[];
-          const map={};
+          if(r.error){ setStatusMsg('Error: '+r.error.message); return; }
+          const data=r.data||[]; const map={};
           for(const rec of data){
             if(isTeamLike(rec.name)) continue;
             let bph=[];
@@ -566,20 +445,19 @@
             const eclecticTotal=bestPerHole.reduce((s,v)=>s+(Number(v)||0),0);
             const nextBestEvent=Math.max(prev.bestEventPoints||0,r.points||0);
             const nextBestHole=Math.max(prev.bestHolePoints||0,Math.max.apply(null,[0].concat(eventPerHole)));
-            next[r.name]={
-              name:r.name,
-              totalPoints:(prev.totalPoints||0)+(r.leaguePoints||0),
-              events:(prev.events||0)+1,
-              bestEventPoints:nextBestEvent,
-              bestHolePoints:nextBestHole,
-              eclecticTotal,
-              bestPerHole
+            next[r.name]={ 
+              name:r.name, 
+              totalPoints:(prev.totalPoints||0)+(r.leaguePoints||0), 
+              events:(prev.events||0)+1, 
+              bestEventPoints:nextBestEvent, 
+              bestHolePoints:nextBestHole, 
+              eclecticTotal, 
+              bestPerHole 
             };
           }
           setSeason(next);
           if(client){
-            const rows=[];
-            const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
+            const rows=[]; const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
             for(const r of vals){
               rows.push({
                 name:r.name,
@@ -588,26 +466,18 @@
                 best_event_points:(r.bestEventPoints??0)|0,
                 best_hole_points:(r.bestHolePoints??0)|0,
                 eclectic_total:(r.eclecticTotal??0)|0,
-                best_per_hole:Array.isArray(r.bestPerHole)
-                  ? r.bestPerHole.map(n=>Number(n)||0)
-                  : Array(18).fill(0)
+                best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
               });
             }
-            const u = await client
-              .from('winter_league_standings')
-              .upsert(rows,{onConflict:'name'});
-            if(u.error){ toast('Error: '+u.error.message); }
-            else { toast('Event added to season ✓'); }
+            const u = await client.from('winter_league_standings').upsert(rows,{onConflict:'name'});
+            if(u.error){ toast('Error: '+u.error.message); } else { toast('Event added to season ✓'); }
           }
         }
 
         async function clearSeason(){
           if(!client){ toast('No Supabase client'); return; }
           if(!window.confirm('This will delete ALL winter league standings. Are you sure?')) return;
-          const { error } = await client
-            .from('winter_league_standings')
-            .delete()
-            .neq('name','');
+          const { error } = await client.from('winter_league_standings').delete().neq('name','');
           if(error){ toast('Error: '+error.message); return; }
           setSeason({});
           toast('Season cleared');
@@ -618,15 +488,12 @@
           if(!window.confirm('Remove this event from the winter league standings?')) return;
 
           const next={ ...season };
-
           for(const r of computed){
             if(isTeamLike(r.name)) continue;
             const prev = next[r.name];
             if(!prev) continue;
-
             const newTotal = (prev.totalPoints||0) - (r.leaguePoints||0);
             const newEvents = Math.max(0,(prev.events||0)-1);
-
             if(newTotal<=0 && newEvents===0){
               delete next[r.name];
             } else {
@@ -644,15 +511,10 @@
           if(client){
             const removedNames = Object.keys(oldSeason).filter(name => !next[name]);
             if(removedNames.length){
-              const { error: delErr } = await client
-                .from('winter_league_standings')
-                .delete()
-                .in('name', removedNames);
+              const { error: delErr } = await client.from('winter_league_standings').delete().in('name', removedNames);
               if(delErr){ toast('Error: '+delErr.message); return; }
             }
-
-            const rows=[];
-            const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
+            const rows=[]; const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
             for(const r of vals){
               rows.push({
                 name:r.name,
@@ -661,39 +523,29 @@
                 best_event_points:(r.bestEventPoints??0)|0,
                 best_hole_points:(r.bestHolePoints??0)|0,
                 eclectic_total:(r.eclecticTotal??0)|0,
-                best_per_hole:Array.isArray(r.bestPerHole)
-                  ? r.bestPerHole.map(n=>Number(n)||0)
-                  : Array(18).fill(0)
+                best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
               });
             }
-            const { error: upErr } = await client
-              .from('winter_league_standings')
-              .upsert(rows,{onConflict:'name'});
-            if(upErr){ toast('Error: '+upErr.message); }
-            else { toast('Event removed from season ✓'); }
+            const { error: upErr } = await client.from('winter_league_standings').upsert(rows,{onConflict:'name'});
+            if(upErr){ toast('Error: '+upErr.message); } else { toast('Event removed from season ✓'); }
           }
         }
 
         function exportEventCSV(){
           if(!computed.length){ toast('Load an event first'); return; }
           const rows=[["Name","Gender","Exact","Stableford","Back9","Pos","Pts","NextExact","NextPlay"]];
-          computed.forEach(r=>{
-            rows.push([
-              r.name,
-              r.gender,
-              Math.round(r.startExact),
-              r.points,
-              r.back9,
-              r.position,
-              r.leaguePoints,
-              r.nextExact.toFixed(1),
-              r.nextPlaying
-            ]);
-          });
-          downloadCSV(
-            `WednesdayWinterLeague_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,
-            rows
-          );
+          computed.forEach(r=>rows.push([
+            r.name,
+            r.gender,
+            Math.round(r.startExact),
+            r.points,
+            r.back9,
+            r.position,
+            r.leaguePoints,
+            r.nextExact.toFixed(1),
+            r.nextPlaying
+          ]));
+          downloadCSV(`WednesdayWinterLeague_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,rows);
         }
 
         // ---------- UI ----------
@@ -783,10 +635,7 @@
                         });
                         setView('event');
                         e.target.value='';
-                      }catch(err){
-                        toast('Bad CSV');
-                        console.error(err);
-                      }
+                      }catch(err){ toast('Bad CSV'); console.error(err); }
                     }}
                   />
 
@@ -1037,13 +886,7 @@
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b border-squab-200 text-left">
-                      <th>Rank</th>
-                      <th>Name</th>
-                      <th>Events</th>
-                      <th>Total</th>
-                      <th>Best Event</th>
-                      <th>Best Hole</th>
-                      <th>Eclectic</th>
+                      <th>Rank</th><th>Name</th><th>Events</th><th>Total</th><th>Best Event</th><th>Best Hole</th><th>Eclectic</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1132,3 +975,4 @@
     </script>
   </body>
 </html>
+
