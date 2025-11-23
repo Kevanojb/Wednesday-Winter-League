@@ -373,7 +373,8 @@
         const [client,setClient] = useState(null);
         const [statusMsg,setStatusMsg] = useState('Connecting…');
 
-        const BUCKET='Wednesday Winter League';
+        // 🔁 NEW BUCKET NAME HERE
+        const BUCKET='winter_league';
         const PREFIX='events';
         const [shared,setShared]=useState([]);
         const [sharedGroups,setSharedGroups]=useState([]);
@@ -493,10 +494,86 @@
           if(client){
             const rows=[]; const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
             for(const r of vals){
-              rows.push({ name:r.name, total_points:r.totalPoints|0, events:r.events|0, best_event_points:(r.bestEventPoints??0)|0, best_hole_points:(r.bestHolePoints??0)|0, eclectic_total:(r.eclecticTotal??0)|0, best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0) });
+              rows.push({
+                name:r.name,
+                total_points:r.totalPoints|0,
+                events:r.events|0,
+                best_event_points:(r.bestEventPoints??0)|0,
+                best_hole_points:(r.bestHolePoints??0)|0,
+                eclectic_total:(r.eclecticTotal??0)|0,
+                best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
+              });
             }
             const u = await client.from('season_standings').upsert(rows,{onConflict:'name'});
             if(u.error){ toast('Error: '+u.error.message); } else { toast('Event added to season ✓'); }
+          }
+        }
+
+        // 🔥 NEW: completely wipe season standings
+        async function clearSeason(){
+          if(!client){ toast('No Supabase client'); return; }
+          if(!window.confirm('This will delete ALL season standings. Are you sure?')) return;
+          const { error } = await client.from('season_standings').delete().neq('name','');
+          if(error){ toast('Error: '+error.message); return; }
+          setSeason({});
+          toast('Season cleared');
+        }
+
+        // 🔥 NEW: remove the CURRENT event from season (approximate – league pts/events only)
+        async function removeEventFromSeason(){
+          if(!computed.length){ toast('Load an event first'); return; }
+          if(!window.confirm('Remove this event from the season standings?')) return;
+
+          const next={ ...season };
+
+          for(const r of computed){
+            if(isTeamLike(r.name)) continue;
+            const prev = next[r.name];
+            if(!prev) continue;
+
+            const newTotal = (prev.totalPoints||0) - (r.leaguePoints||0);
+            const newEvents = Math.max(0,(prev.events||0)-1);
+
+            if(newTotal<=0 && newEvents===0){
+              delete next[r.name];
+            } else {
+              next[r.name] = {
+                ...prev,
+                totalPoints:newTotal,
+                events:newEvents
+                // NOTE: bestEventPoints / bestHolePoints / eclecticTotal left as-is.
+                // For a perfectly accurate rollback you'd clear the season and re-add events.
+              };
+            }
+          }
+
+          setSeason(next);
+
+          if(client){
+            // figure out which names disappeared entirely
+            const removedNames = Object.keys(season).filter(name => !next[name]);
+            if(removedNames.length){
+              const { error: delErr } = await client
+                .from('season_standings')
+                .delete()
+                .in('name', removedNames);
+              if(delErr){ toast('Error: '+delErr.message); return; }
+            }
+
+            const rows=[]; const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
+            for(const r of vals){
+              rows.push({
+                name:r.name,
+                total_points:r.totalPoints|0,
+                events:r.events|0,
+                best_event_points:(r.bestEventPoints??0)|0,
+                best_hole_points:(r.bestHolePoints??0)|0,
+                eclectic_total:(r.eclecticTotal??0)|0,
+                best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
+              });
+            }
+            const { error: upErr } = await client.from('season_standings').upsert(rows,{onConflict:'name'});
+            if(upErr){ toast('Error: '+upErr.message); } else { toast('Event removed from season ✓'); }
           }
         }
 
@@ -578,11 +655,24 @@
                     disabled={!canAct}
                   >Add Event → Season</button>
 
+                  {/* NEW: Remove this event from season */}
+                  <button
+                    className={`w-full text-left rounded-xl border px-3 py-2 ${canAct?'border-amber-300 bg-amber-50 text-amber-800':'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'}`}
+                    onClick={removeEventFromSeason}
+                    disabled={!canAct}
+                  >Remove Event ← Season</button>
+
                   <button
                     className={`w-full text-left rounded-xl border px-3 py-2 ${canAct?'border-squab-200 bg-white':'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'}`}
                     onClick={exportEventCSV}
                     disabled={!canAct}
                   >Download CSV</button>
+
+                  {/* NEW: Delete entire season */}
+                  <button
+                    className="w-full text-left rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-red-700"
+                    onClick={clearSeason}
+                  >Delete Entire Season</button>
                 </div>
               </div>
             </section>
