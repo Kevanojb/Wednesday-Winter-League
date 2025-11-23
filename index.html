@@ -395,7 +395,8 @@
               if(!(window.supabase && window.supabase.createClient)){ setTimeout(boot,250); return; }
               const c = window.supabase.createClient(defaultURL, defaultKEY, { auth:{ persistSession:false }});
               if(cancelled) return; setClient(c);
-              const probe = await c.from('season_standings').select('name').limit(1);
+              // ✅ probe new table
+              const probe = await c.from('winter_league_standings').select('name').limit(1);
               if(cancelled) return;
               if(probe.error){ setStatusMsg('Error: '+probe.error.message); }
               else{ setStatusMsg('Connected'); await refreshShared(c); await fetchSeasonWith(c); }
@@ -475,7 +476,9 @@
         },[players]);
 
         async function fetchSeasonWith(c){
-          const r = await c.from('season_standings').select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
+          const r = await c
+            .from('winter_league_standings')
+            .select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
           if(r.error){ setStatusMsg('Error: '+r.error.message); return; }
           const data=r.data||[]; const map={};
           for(const rec of data){
@@ -515,7 +518,9 @@
                 best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
               });
             }
-            const u = await client.from('season_standings').upsert(rows,{onConflict:'name'});
+            const u = await client
+              .from('winter_league_standings')
+              .upsert(rows,{onConflict:'name'});
             if(u.error){ toast('Error: '+u.error.message); } else { toast('Event added to season ✓'); }
           }
         }
@@ -524,7 +529,10 @@
         async function clearSeason(){
           if(!client){ toast('No Supabase client'); return; }
           if(!window.confirm('This will delete ALL season standings. Are you sure?')) return;
-          const { error } = await client.from('season_standings').delete().neq('name','');
+          const { error } = await client
+            .from('winter_league_standings')
+            .delete()
+            .neq('name','');
           if(error){ toast('Error: '+error.message); return; }
           setSeason({});
           toast('Season cleared');
@@ -564,7 +572,7 @@
             const removedNames = Object.keys(oldSeason).filter(name => !next[name]);
             if(removedNames.length){
               const { error: delErr } = await client
-                .from('season_standings')
+                .from('winter_league_standings')
                 .delete()
                 .in('name', removedNames);
               if(delErr){ toast('Error: '+delErr.message); return; }
@@ -582,7 +590,9 @@
                 best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
               });
             }
-            const { error: upErr } = await client.from('season_standings').upsert(rows,{onConflict:'name'});
+            const { error: upErr } = await client
+              .from('winter_league_standings')
+              .upsert(rows,{onConflict:'name'});
             if(upErr){ toast('Error: '+upErr.message); } else { toast('Event removed from season ✓'); }
           }
         }
