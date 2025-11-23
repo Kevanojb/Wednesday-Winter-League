@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Den Society — League & Eclectic</title>
+    <title>Wednesday Winter League — League & Eclectic</title>
     <link rel="icon" href="./favicon.ico" />
     <meta name="theme-color" content="#199f57" />
-    <meta property="og:title" content="Den Society — League & Eclectic" />
+    <meta property="og:title" content="Wednesday Winter League — League & Eclectic" />
     <meta property="og:description" content="Event results, ratings, standings and eclectic leaderboard." />
 
     <!-- IMPORTANT: Tailwind config BEFORE the CDN so custom colors work -->
@@ -373,13 +373,13 @@
         const [client,setClient] = useState(null);
         const [statusMsg,setStatusMsg] = useState('Connecting…');
 
-        // 🔁 NEW BUCKET NAME HERE
+        // bucket + folder
         const BUCKET='winter_league';
         const PREFIX='events';
         const [shared,setShared]=useState([]);
         const [sharedGroups,setSharedGroups]=useState([]);
 
-        const [eventName,setEventName]=useState('Den Society Meeting');
+        const [eventName,setEventName]=useState('Wednesday Winter League');
         const [players,setPlayers]=useState([]);
         const [season,setSeason]=useState({});
         const [coursePars,setCoursePars] = useState({
@@ -406,15 +406,26 @@
         },[]);
 
         async function refreshShared(c){
-          c=c||client; if(!c) return;
-          const r = await c.storage.from(BUCKET).list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
-          if(r.error) return;
+          c = c || client;
+          if (!c) return;
+
+          const r = await c.storage
+            .from(BUCKET)
+            .list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
+
+          if (r.error) {
+            console.error('Storage list error:', r.error);
+            toast('Storage error: ' + r.error.message);
+            return;
+          }
+
           const data=(r.data||[])
             .filter(x=>!x.name.startsWith('.') && /\.csv$/i.test(x.name))
             .map(x=>({ name:x.name.replace(/\.csv$/i,''), file:x.name, path: PREFIX+'/'+x.name }));
           setShared(data);
           setSharedGroups(groupByYear(data));
         }
+
         function groupByYear(files){
           const groups={};
           for(const f of files){ const m=f.name.match(/(20\d{2})/); const year=m?m[1]:'Unknown'; (groups[year]=groups[year]||[]).push(f); }
@@ -509,7 +520,7 @@
           }
         }
 
-        // 🔥 NEW: completely wipe season standings
+        // wipe whole season
         async function clearSeason(){
           if(!client){ toast('No Supabase client'); return; }
           if(!window.confirm('This will delete ALL season standings. Are you sure?')) return;
@@ -519,7 +530,7 @@
           toast('Season cleared');
         }
 
-        // 🔥 NEW: remove the CURRENT event from season (approximate – league pts/events only)
+        // remove current event from season (approximate rollback)
         async function removeEventFromSeason(){
           if(!computed.length){ toast('Load an event first'); return; }
           if(!window.confirm('Remove this event from the season standings?')) return;
@@ -541,17 +552,16 @@
                 ...prev,
                 totalPoints:newTotal,
                 events:newEvents
-                // NOTE: bestEventPoints / bestHolePoints / eclecticTotal left as-is.
-                // For a perfectly accurate rollback you'd clear the season and re-add events.
+                // bestEventPoints / bestHolePoints / eclecticTotal left as-is
               };
             }
           }
 
+          const oldSeason = season;
           setSeason(next);
 
           if(client){
-            // figure out which names disappeared entirely
-            const removedNames = Object.keys(season).filter(name => !next[name]);
+            const removedNames = Object.keys(oldSeason).filter(name => !next[name]);
             if(removedNames.length){
               const { error: delErr } = await client
                 .from('season_standings')
@@ -581,7 +591,7 @@
           if(!computed.length){ toast('Load an event first'); return; }
           const rows=[["Name","Gender","Exact","Stableford","Back9","Pos","Pts","NextExact","NextPlay"]];
           computed.forEach(r=>rows.push([r.name,r.gender,Math.round(r.startExact),r.points,r.back9,r.position,r.leaguePoints,r.nextExact.toFixed(1),r.nextPlaying]));
-          downloadCSV(`DenSociety_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,rows);
+          downloadCSV(`WednesdayWinterLeague_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,rows);
         }
 
         // ---------- UI ----------
@@ -590,7 +600,7 @@
             <header className="hide-print rounded-2xl p-4 border border-squab-700 bg-squab-600 text-white">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h1 className="text-xl md:text-2xl font-bold tracking-tight">Den Society — League & Eclectic</h1>
+                  <h1 className="text-xl md:text-2xl font-bold tracking-tight">Wednesday Winter League — League & Eclectic</h1>
                   <p className="text-xs/5 text-white/90">Supabase: {statusMsg}</p>
                 </div>
                 <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">{eventName||'Untitled Event'}</span>
@@ -655,7 +665,6 @@
                     disabled={!canAct}
                   >Add Event → Season</button>
 
-                  {/* NEW: Remove this event from season */}
                   <button
                     className={`w-full text-left rounded-xl border px-3 py-2 ${canAct?'border-amber-300 bg-amber-50 text-amber-800':'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'}`}
                     onClick={removeEventFromSeason}
@@ -668,7 +677,6 @@
                     disabled={!canAct}
                   >Download CSV</button>
 
-                  {/* NEW: Delete entire season */}
                   <button
                     className="w-full text-left rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-red-700"
                     onClick={clearSeason}
@@ -683,7 +691,7 @@
           return (
             <section className="rounded-2xl p-3 md:p-4 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-lg font-semibold text-squab-900">Past Den Society Golf Games</h2>
+                <h2 className="text-lg font-semibold text-squab-900">Past Wednesday Winter League Games</h2>
                 <button className="btn border border-squab-200" onClick={()=>setView('home')}>Back</button>
               </div>
               {sharedGroups.length===0 && <div className="text-sm text-neutral-600 p-2">No shared CSVs yet.</div>}
@@ -843,10 +851,25 @@
                 <button className="btn border border-squab-200" onClick={()=>setView('home')}>Back</button>
               </div>
               <div className="overflow-auto">
-                <table className="min-w-full text-sm"><thead><tr className="border-b border-squab-200 text-left"><th>Rank</th><th>Name</th><th>Events</th><th>Total</th><th>Best Event</th><th>Best Hole</th><th>Eclectic</th></tr></thead>
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-squab-200 text-left">
+                      <th>Rank</th><th>Name</th><th>Events</th><th>Total</th><th>Best Event</th><th>Best Hole</th><th>Eclectic</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {list.length===0 && <tr><td colSpan="7" className="py-3 text-neutral-600">No season data found.</td></tr>}
-                    {list.map((r,i)=>(<tr key={r.name} className="border-b border-squab-200"><td>{i+1}</td><td>{r.name}</td><td>{r.events}</td><td>{r.totalPoints}</td><td>{r.bestEventPoints??0}</td><td>{r.bestHolePoints??0}</td><td>{r.eclecticTotal??0}</td></tr>))}
+                    {list.map((r,i)=>(
+                      <tr key={r.name} className="border-b border-squab-200">
+                        <td>{i+1}</td>
+                        <td>{r.name}</td>
+                        <td>{r.events}</td>
+                        <td>{r.totalPoints}</td>
+                        <td>{r.bestEventPoints??0}</td>
+                        <td>{r.bestHolePoints??0}</td>
+                        <td>{r.eclecticTotal??0}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -864,10 +887,24 @@
               </div>
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
-                  <thead><tr className="border-b border-squab-200 text-left"><th>Rank</th><th>Name</th><th>Eclectic Total</th>{Array.from({length:18},(_,i)=>(<th key={i}>H{i+1}</th>))}</tr></thead>
+                  <thead>
+                    <tr className="border-b border-squab-200 text-left">
+                      <th>Rank</th>
+                      <th>Name</th>
+                      <th>Eclectic Total</th>
+                      {Array.from({length:18},(_,i)=>(<th key={i}>H{i+1}</th>))}
+                    </tr>
+                  </thead>
                   <tbody>
                     {list.length===0 && <tr><td colSpan="21" className="py-3 text-neutral-600">No eclectic yet.</td></tr>}
-                    {list.map((r,i)=>(<tr key={r.name} className="border-b border-squab-200"><td>{i+1}</td><td>{r.name}</td><td>{r.eclecticTotal??0}</td>{(Array.isArray(r.bestPerHole)?r.bestPerHole:Array(18).fill(0)).map((v,ix)=>(<td key={ix}>{v}</td>))}</tr>))}
+                    {list.map((r,i)=>(
+                      <tr key={r.name} className="border-b border-squab-200">
+                        <td>{i+1}</td>
+                        <td>{r.name}</td>
+                        <td>{r.eclecticTotal??0}</td>
+                        {(Array.isArray(r.bestPerHole)?r.bestPerHole:Array(18).fill(0)).map((v,ix)=>(<td key={ix}>{v}</td>))}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
