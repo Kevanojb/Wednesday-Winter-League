@@ -7,25 +7,24 @@
     <link rel="icon" href="./favicon.ico" />
     <meta name="theme-color" content="#199f57" />
     <meta property="og:title" content="Wednesday Winter League — League & Eclectic" />
-    <meta property="og:description" content="Event results, ratings, standings and eclectic leaderboard." />
+    <meta property="og:description" content="Event results, ratings, standings, player hole analysis and eclectic leaderboard." />
 
-    <!-- IMPORTANT: Tailwind config BEFORE the CDN so custom colors work -->
+    <!-- Tailwind Config FIRST -->
     <script>
-      window.tailwind = window.tailwind || {};
-      window.tailwind.config = {
+      window.tailwind = {
         darkMode: 'class',
         theme: {
           extend: {
             colors: {
               squab: {
-                50:  '#eefbf2', /* mint */
+                50:  '#eefbf2',
                 100: '#d8f5e3',
-                200: '#b4eac9', /* mint border */
+                200: '#b4eac9',
                 300: '#86dbab',
                 400: '#55c787',
                 500: '#2fb66a',
-                600: '#199f57', /* primary green */
-                700: '#147f47', /* darker border */
+                600: '#199f57',
+                700: '#147f47',
                 800: '#12663b',
                 900: '#0f5232'
               }
@@ -36,1507 +35,1521 @@
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- React + Babel + Supabase UMD -->
+    <!-- React + Babel + Supabase (UMD builds) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 
+    <!-- Base styles -->
     <style>
-      body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-      .chip{padding:.15rem .5rem;border-radius:.5rem;border:1px solid #e5e5e5;background:#fafafa}
-      .btn{padding:.5rem .75rem;border-radius:.75rem;transition:all .15s ease}
-      .btn:hover{transform:translateY(-1px);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-      .panel-mint{ background:#eefbf2; border:1px solid #b4eac9 } /* squab 50 + 200 */
-      @media print{ .hide-print{display:none!important} }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      }
+      .chip {
+        padding: 0.3rem 0.65rem;
+        border-radius: 0.5rem;
+        border: 1px solid #c6e7d0;
+        background: #eefbf2;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.15s;
+      }
+      .chip:hover {
+        background: #dff7e6;
+        transform: translateY(-1px);
+      }
+      .btn {
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.75rem;
+        transition: all 0.15s ease;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+      }
+      .panel-mint {
+        background: #eefbf2;
+        border: 1px solid #b4eac9;
+      }
+      @media print { .hide-print { display: none !important; } }
     </style>
   </head>
+
   <body class="bg-neutral-50 text-neutral-900">
     <div id="root"></div>
 
+    <!-- React App -->
     <script type="text/babel" data-presets="react">
       /* global React, ReactDOM, supabase */
-      const { useState, useMemo, useEffect, useRef } = React;
 
-      // ---------- utilities ----------
-      const POINTS_TABLE = [20,17,15,13,11,9,8,7,6,5,4,3,2,1];
-      const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
-      const csvEscape = s => {
-        if (s == null) return "";
-        const str = String(s);
-        return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+      const { useState, useEffect, useMemo, useRef } = React;
+
+// -----------------------
+// Utility Functions
+// -----------------------
+
+const POINTS_TABLE = [20,17,15,13,11,9,8,7,6,5,4,3,2,1];
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+const csvEscape = s => {
+  if (s == null) return "";
+  const str = String(s);
+  return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+};
+
+const downloadCSV = (filename, rows) => {
+  const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+};
+
+const to1 = x => Math.round((Number(x)||0)*10)/10;
+
+function toast(msg){
+  try{
+    const t=document.createElement('div');
+    t.className='fixed bottom-4 right-4 left-4 md:left-auto md:right-4 px-3 py-2 rounded-lg bg-black text-white text-sm shadow z-50 text-center';
+    t.textContent=msg;
+    document.body.appendChild(t);
+    setTimeout(()=>{
+      t.style.opacity='0';
+      t.style.transition='opacity .2s';
+      setTimeout(()=>t.remove(),220);
+    }, 1400);
+  }catch{}
+}
+
+// -----------------------
+// Default Course Data
+// -----------------------
+
+const COURSE_DEFAULT_MEN = [4,4,3,4,5,4,3,4,4, 4,5,4,3,4,4,5,3,4];
+const COURSE_DEFAULT_WOMEN = [4,4,3,4,5,4,3,4,4, 4,4,5,3,4,4,5,3,4];
+
+// Chart Hills Blue (66) Tee Yardages
+const COURSE_YARDS_MEN = [
+  562,445,165,391,474,289,206,399,350,
+  405,165,487,412,350,409,482,126,413
+];
+
+// Chart Hills Red Tee Yardages
+const COURSE_YARDS_WOMEN = [
+  498,364,111,329,420,230,147,358,276,
+  391,127,412,347,305,363,402,78,345
+];
+
+// Stroke Index (same for men/women here)
+const COURSE_STROKE_INDEX = [
+  10,6,16,4,18,12,14,2,8,
+  5,11,17,1,13,3,7,15,9
+];
+
+// -----------------------
+// Handicap Maths
+// -----------------------
+
+function playingCapByGender(g){ return g==="F"?36:28; }
+function rangeForHcap(h){
+  if(h<=9)return"0-9";
+  if(h<=18)return"10-18";
+  if(h<=28)return"19-28";
+  return"29-36";
+}
+function cutPerPointOver34(h){
+  const r=rangeForHcap(h);
+  return r==="0-9"?0.5 : r==="10-18"?1 : r==="19-28"?1 : 1.5;
+}
+function winnerBonusCut(h){
+  const r=rangeForHcap(h);
+  return r==="0-9"?1 : r==="10-18"?2 : r==="19-28"?2.5 : 3;
+}
+function computeNewExactHandicap(start,g,pts,b9,isWinner){
+  const startPlay=Math.round(start);
+  let exact=start;
+
+  if(pts>=35){
+    exact-=cutPerPointOver34(startPlay)*(pts-34);
+  } else if(pts<=31){
+    exact+=0.5*(32-pts);
+  }
+
+  if(isWinner) exact-=winnerBonusCut(startPlay);
+
+  const max=playingCapByGender(g);
+  const bounded=clamp(exact,0,60);
+  const nextPlay=clamp(Math.round(bounded),0,max);
+
+  return {
+    nextExact:bounded,
+    nextPlaying:nextPlay
+  };
+}
+
+// -----------------------
+// CSV Parsing (Squabbit Friendly)
+// -----------------------
+
+const isTeamLike = name => {
+  const s = (name || '').trim();
+  return (
+    /^players?$/i.test(s) ||
+    /^team(\s*\d+)?$/i.test(s) ||
+    /^team average$/i.test(s) ||
+    /^stableford$/i.test(s) ||
+    /^strokeplay$/i.test(s) ||
+    /^round\s*\d+$/i.test(s) ||
+    /^(out|in|total|s\.i\.|par)$/i.test(s)
+  );
+};
+
+function splitSmart(raw){
+  const d = raw.includes('\t') ? '\t' : (raw.includes(';') ? ';' : ',');
+  return raw.split(d).map(s => (s||'').replace(/^"|"$/g,'').trim());
+}
+function toNum(x){
+  const v=parseFloat(String(x == null ? '' : x).replace(/[^0-9.\-]/g,''));
+  return Number.isFinite(v)?v:NaN;
+}
+
+// Read per-hole Stableford for an individual card
+function readStablefordPerHole(row){
+  let start=-1;
+  for(let i=0;i<row.length;i++){
+    if(String(row[i]).trim().toLowerCase()==='stableford'){ start=i; break; }
+  }
+  if(start<0) return null;
+
+  const vals=[];
+  for(let j=start+2; j<row.length && vals.length<18; j++){
+    const raw=String(row[j]||'').trim();
+    if(!raw) continue;
+    if(raw==='P' || raw==='p' || raw==='\\'){ vals.push(0); continue; }
+    const n=parseFloat(raw.replace(/[^0-9.\-]/g,''));
+    if(Number.isFinite(n) && n>=0 && n<=6){ vals.push(n); }
+  }
+  while(vals.length<18) vals.push(0);
+  return vals.slice(0,18);
+}
+
+// -----------------------
+// Parse Entire Squabbit CSV
+// -----------------------
+
+function parseSquabbitCSV(text){
+  const rows = text.replace(/\r/g,'').split('\n');
+  const lines = rows.map(splitSmart);
+
+  // --- Detect PAR row ---
+  let parsedPars=null;
+  for(let i=0;i<lines.length;i++){
+    const row=lines[i];
+    if((row[0]||'').trim().toLowerCase()==='par'){
+      const nums=[];
+      for(let j=3;j<row.length;j++){
+        const cell=String(row[j]||'').trim();
+        const n=parseInt(cell,10);
+        if(!Number.isNaN(n)) nums.push(n);
+      }
+      if(nums.length>=19){
+        const front = nums.slice(0,9);
+        const back  = nums.slice(10,19);
+        parsedPars = front.concat(back);
+      } else if(nums.length===18){
+        parsedPars = nums.slice(0,18);
+      }
+      break;
+    }
+  }
+  if(!parsedPars || parsedPars.length!==18){
+    parsedPars = COURSE_DEFAULT_MEN.slice();
+  }
+
+  // --- Roster detection ---
+  let playerHeaderRow=-1;
+  for(let i=0;i<lines.length;i++){
+    if((lines[i][0]||'')==='Name' && (lines[i][1]||'')==='Hdcp'){
+      playerHeaderRow=i; break;
+    }
+  }
+
+  const players=[];
+
+  if(playerHeaderRow>=0){
+    for(let i=playerHeaderRow+1;i<lines.length;i++){
+      const row=lines[i];
+      if(!row) break;
+      const name=(row[0]||'').trim();
+      if(!name) break;
+      if(isTeamLike(name)) continue;
+      if(/^player$/i.test(name)) continue;
+      const hcap = parseFloat((row[1]||'').trim());
+      if(!Number.isNaN(hcap)){
+        players.push({ name, handicap:hcap, gender:'M' });
+      }
+    }
+  }
+
+  // --- Detect gender from tee labels ---
+  const genderMap={};
+  for(let r=0;r<lines.length;r++){
+    const row=lines[r];
+    if(!row) continue;
+    const nm=(row[0]||'').trim();
+    if(!nm) continue;
+    const tee=String(row[1]||'').toLowerCase();
+    if(/women|ladies|red tee/.test(tee)) genderMap[nm]='F';
+    else if(genderMap[nm]==null) genderMap[nm]='M';
+  }
+  for(const p of players){
+    if(genderMap[p.name]) p.gender = genderMap[p.name];
+  }
+
+  // --- Summary stableford table ---
+  let totalsStart=-1;
+  for(let i=0;i<lines.length;i++){
+    const first=(lines[i][0]||'').trim().toLowerCase();
+    if(first==='stableford'){ totalsStart=i; break; }
+  }
+
+  const totals={};
+
+  if(totalsStart>=0){
+    for(let i=totalsStart+2;i<lines.length;i++){
+      const row=lines[i];
+      if(!row) break;
+      const name=(row[0]||'').trim();
+      if(!name || name==='...' || /^round\s*\d+/i.test(name)) break;
+      if(/^(player)$/i.test(name)) continue;
+      if(isTeamLike(name)) continue;
+
+      const numeric=[];
+      for(let j=1;j<row.length;j++){
+        const v=toNum(row[j]);
+        if(Number.isFinite(v)) numeric.push(v);
+      }
+      if(!numeric.length) continue;
+      totals[name] = numeric[numeric.length-1];
+
+      if(!players.some(p=>p.name===name)){
+        players.push({ name, handicap:0, gender:genderMap[name]||'M' });
+      }
+    }
+  }
+
+  // --- Individual card per-hole extraction ---
+  const holeData={};
+  for(const p of players){
+    let found=false;
+    for(let i=0;i<lines.length-1;i++){
+      const row=lines[i];
+      if(!row) continue;
+      if((row[0]||'').trim()===p.name){
+        const stRow = lines[i+1] || [];
+        let stIndex=-1;
+        for(let j=0;j<stRow.length;j++){
+          if(String(stRow[j]).trim().toLowerCase()==='stableford'){ stIndex=j; break; }
+        }
+        if(stIndex<0) continue;
+
+        const perHole=readStablefordPerHole(stRow);
+        const back9 = perHole.slice(9).reduce((a,b)=>a+(Number(b)||0),0);
+        const hcapCard = toNum(stRow[stIndex+1]);
+
+        let totalFromCard=NaN;
+        for(let j=stRow.length-1;j>stIndex;j--){
+          const v=toNum(stRow[j]);
+          if(Number.isFinite(v)){ totalFromCard=v; break; }
+        }
+
+        holeData[p.name] = { perHole, back9, hcapCard, totalFromCard };
+        found=true;
+        break;
+      }
+    }
+    if(!found){
+      holeData[p.name] = {
+        perHole:Array(18).fill(0),
+        back9:0, hcapCard:NaN, totalFromCard:NaN
       };
-      const downloadCSV=(filename, rows)=>{
-        const csv=rows.map(r=>r.map(csvEscape).join(",")).join("\n");
-        const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-        const a=document.createElement("a");
-        a.href=URL.createObjectURL(blob);
-        a.download=filename;
-        a.click();
-      };
-      const to1=x=>Math.round((Number(x)||0)*10)/10;
-      function toast(msg){
-        try{
-          const t=document.createElement('div');
-          t.className='fixed bottom-4 right-4 left-4 md:left-auto md:right-4 px-3 py-2 rounded-lg bg-black text-white text-sm shadow z-50 text-center';
-          t.textContent=msg;
-          document.body.appendChild(t);
-          setTimeout(()=>{
-            t.style.opacity='0';
-            t.style.transition='opacity .2s';
-            setTimeout(()=>t.remove(),220);
-          }, 1400);
-        }catch{}
-      }
+    }
+  }
 
-      // Default pars (fallback if CSV doesn’t contain Par row)
-      const COURSE_DEFAULT_MEN   = [4,4,3,4,5,4,3,4,4, 4,5,4,3,4,4,5,3,4];
-      const COURSE_DEFAULT_WOMEN = [4,4,3,4,5,4,3,4,4, 4,4,5,3,4,4,5,3,4];
+  // --- Final cleaned players ---
+  const cleaned = players.filter(p =>
+    p.name &&
+    !/^player$/i.test(p.name.trim()) &&
+    !isTeamLike(p.name)
+  );
 
-      // Chart Hills yardages & stroke index (static for this league)
-      const COURSE_YARDS_MEN = [
-        564,443,166,402,487,300,185,404,353,
-        407,159,529,416,375,409,505,136,413
-      ];
-      const COURSE_YARDS_WOMEN = [
-        498,364,111,329,420,230,147,358,276,
-        391,127,412,347,305,363,402,78,345
-      ];
-      const COURSE_STROKE_INDEX = [
-        10,6,16,4,18,12,14,2,8,
-        5,11,17,1,7,3,13,15,9
-      ];
+  const finalPlayers = cleaned.map(p=>{
+    const card=holeData[p.name]||{};
+    const hcapCard = card.hcapCard;
+    let handicap = Number.isFinite(p.handicap)?p.handicap:NaN;
 
-      // Header-ish / non-player names
-      const isTeamLike = name => {
-        const s = (name || '').trim();
-        return (
-          /^players?$/i.test(s) ||           // Player / Players
-          /^team(\s*\d+)?$/i.test(s) ||     // Team, Team 1, Team 2
-          /^team average$/i.test(s) ||
-          /^stableford$/i.test(s) ||
-          /^strokeplay$/i.test(s) ||
-          /^round\s*\d+$/i.test(s) ||
-          /^(out|in|total|s\.i\.|par)$/i.test(s)
-        );
-      };
+    if(!Number.isFinite(handicap) || handicap<=0){
+      handicap = Number.isFinite(hcapCard)?hcapCard:0;
+    }
 
-      // Handicap maths
-      function playingCapByGender(g){ return g==="F"?36:28; }
-      function rangeForHcap(h){ if(h<=9)return"0-9"; if(h<=18)return"10-18"; if(h<=28)return"19-28"; return"29-36"; }
-      function cutPerPointOver34(h){ const r=rangeForHcap(h); return r==="0-9"?0.5:r==="10-18"?1:r==="19-28"?1:1.5; }
-      function winnerBonusCut(h){ const r=rangeForHcap(h); return r==="0-9"?1:r==="10-18"?2:r==="19-28"?2.5:3; }
-      function computeNewExactHandicap(start,g,pts,b9,w){
-        const startPlay=Math.round(start); let exact=start;
-        if(pts>=35){exact-=cutPerPointOver34(startPlay)*(pts-34);}
-        else if(pts<=31){ exact+=0.5*(32-pts);}
-        if(w) exact-=winnerBonusCut(startPlay);
-        const max=playingCapByGender(g);
-        const bounded=clamp(exact,0,60);
-        const nextPlay=clamp(Math.round(bounded),0,max);
-        return {nextExact:bounded,nextPlaying:nextPlay};
-      }
+    const ptsSummary = totals[p.name];
+    const cardTotal = card.totalFromCard;
+    let points = 0;
+    if(Number.isFinite(ptsSummary)) points = ptsSummary;
+    else if(Number.isFinite(cardTotal)) points = cardTotal;
 
-      // ---------- CSV parsing ----------
+    return {
+      name:p.name,
+      gender:p.gender||genderMap[p.name]||'M',
+      handicap,
+      points,
+      back9:card.back9||0,
+      perHole:card.perHole||[]
+    };
+  });
 
-      function splitSmart(raw){
-        const d = raw.includes('\t') ? '\t' : (raw.includes(';') ? ';' : ',');
-        return raw.split(d).map(s => (s||'').replace(/^"|"$/g,'').trim());
-      }
+  return {
+    players: finalPlayers,
+    parsMen: parsedPars,
+    parsWomen: parsedPars,
+    yardsMen: COURSE_YARDS_MEN,
+    yardsWomen: COURSE_YARDS_WOMEN,
+    strokeIndex: COURSE_STROKE_INDEX
+  };
+}
+// ---------------------------
+// App Component
+// ---------------------------
+function App() {
+  const [view, setView] = useState('home'); 
+  const [selectedPlayer, setSelectedPlayer] = useState('');
+  
+  // Supabase config
+  const SUPA_URL = "https://mqknahdfpqxrpgpxqtus.supabase.co";
+  const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
 
-      function toNum(x){
-        const v=parseFloat(String(x == null ? '' : x).replace(/[^0-9.\-]/g,''));
-        return Number.isFinite(v)?v:NaN;
-      }
+  const BUCKET = "winter_league";
+  const PREFIX = "events";
 
-      // Per-hole Stableford reader for Squabbit card rows
-      function readStablefordPerHole(row){
-        let start = -1;
-        for (let i = 0; i < row.length; i++) {
-          if (String(row[i]).trim().toLowerCase() === 'stableford') {
-            start = i;
-            break;
-          }
-        }
-        if (start < 0) return null;
+  const [client, setClient] = useState(null);
+  const [statusMsg, setStatusMsg] = useState("Connecting…");
 
-        const vals = [];
+  const [shared, setShared] = useState([]);
+  const [sharedGroups, setSharedGroups] = useState([]);
 
-        // Skip the playing handicap cell just after "Stableford"
-        for (let j = start + 2; j < row.length && vals.length < 18; j++) {
-          const raw = String(row[j] || '').trim();
-          if (!raw) continue;
+  const [players, setPlayers] = useState([]);
+  const [season, setSeason] = useState({});
+  const [eventName, setEventName] = useState("Wednesday Winter League");
 
-          // Pick-up etc → 0 points
-          if (raw === 'P' || raw === 'p' || raw === '\\') {
-            vals.push(0);
-            continue;
-          }
+  const [coursePars, setCoursePars] = useState({
+    men: COURSE_DEFAULT_MEN,
+    women: COURSE_DEFAULT_WOMEN
+  });
 
-          const n = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
+  const [courseYards, setCourseYards] = useState({
+    men: COURSE_YARDS_MEN,
+    women: COURSE_YARDS_WOMEN
+  });
 
-          // Per-hole Stableford scores are small ints; ignore big totals like 16/17/33
-          if (Number.isFinite(n) && n >= 0 && n <= 6) {
-            vals.push(n);
-          }
+  const fileInputRef = useRef(null);
+
+  // ---------------------------
+  // Init Supabase + fetch season + shared events
+  // ---------------------------
+  useEffect(() => {
+    let cancelled = false;
+
+    async function boot() {
+      try {
+        if (!(window.supabase && window.supabase.createClient)) {
+          setTimeout(boot, 200);
+          return;
         }
 
-        while (vals.length < 18) vals.push(0);
-        return vals.slice(0, 18);
-      }
-
-      function parseSquabbitCSV(text){
-        const rows = text.replace(/\r/g,'').split('\n');
-        const lines = rows.map(splitSmart);
-
-        // ---- 0. Course par from "Par" row (if present) ----
-        let parsedPars = null;
-        for (let i = 0; i < lines.length; i++) {
-          const row = lines[i];
-          if (!row || !row[0]) continue;
-          if (String(row[0]).trim().toLowerCase() === 'par') {
-            const nums = [];
-            for (let j = 3; j < row.length; j++) {
-              const cell = String(row[j] || '').trim();
-              const n = parseInt(cell,10);
-              if (!Number.isNaN(n)) nums.push(n);
-            }
-            if (nums.length >= 19) {
-              // Pattern: 9 holes, 36, 9 holes, 36, 72
-              const front = nums.slice(0,9);
-              const back = nums.slice(10,19);
-              parsedPars = front.concat(back);
-            } else if (nums.length === 18) {
-              parsedPars = nums.slice(0,18);
-            }
-            break;
-          }
-        }
-        if (!parsedPars || parsedPars.length !== 18) {
-          parsedPars = COURSE_DEFAULT_MEN.slice();
-        }
-
-        // ---- 1. Optional roster (Name/Hdcp + extra columns) ----
-        let playerHeaderRow = -1;
-        for (let i = 0; i < lines.length; i++) {
-          if ((lines[i][0] || '') === 'Name' && (lines[i][1] || '') === 'Hdcp') {
-            playerHeaderRow = i;
-            break;
-          }
-        }
-
-        const players = [];
-
-        if (playerHeaderRow >= 0) {
-          for (let i = playerHeaderRow + 1; i < lines.length; i++) {
-            const row = lines[i];
-            if (!row) break;
-
-            const name = (row[0] || '').trim();
-            if (!name) break;
-            if (isTeamLike(name)) continue;
-            if (/^player$/i.test(name)) continue; // explicit "Player" guard
-
-            const hcap = parseFloat((row[1] || '').trim());
-            if (!Number.isNaN(hcap)) {
-              players.push({ name, handicap: hcap, gender: 'M' });
-            }
-          }
-        }
-
-        // ---- 2. Gender hints from tees ----
-        const genderMap = {};
-        for (let r = 0; r < lines.length; r++) {
-          const row = lines[r];
-          if (!row) continue;
-          const nm = (row[0] || '').trim();
-          if (!nm) continue;
-          const tee = String(row[1] || '').toLowerCase();
-          if (/women|ladies|red tee/.test(tee)) genderMap[nm] = 'F';
-          else if (genderMap[nm] == null) genderMap[nm] = 'M';
-        }
-        for (const p of players) {
-          if (genderMap[p.name]) p.gender = genderMap[p.name];
-        }
-
-        // ---- 3. Stableford totals from the "Stableford" summary table ----
-        let totalsStart = -1;
-        for (let i = 0; i < lines.length; i++) {
-          const first = (lines[i][0] || '').trim().toLowerCase();
-          if (first === 'stableford') {
-            totalsStart = i;
-            break;
-          }
-        }
-
-        const totals = {};
-        if (totalsStart >= 0) {
-          // Row after is header; data starts from +2
-          for (let i = totalsStart + 2; i < lines.length; i++) {
-            const row = lines[i];
-            if (!row) break;
-
-            const name = (row[0] || '').trim();
-
-            // Stop at blank / "..." / "Round X"
-            if (!name || name === '...' || /^round\s*\d+/i.test(name)) break;
-
-            // Skip header / aggregate-ish rows
-            if (/^player$/i.test(name)) continue;
-            if (isTeamLike(name)) continue;
-            if (!/[A-Za-z]/.test(name)) continue;
-
-            // Collect all numeric cells apart from the name; last numeric = Total
-            const numeric = [];
-            for (let j = 1; j < row.length; j++) {
-              const v = toNum(row[j]);
-              if (Number.isFinite(v)) numeric.push(v);
-            }
-            if (!numeric.length) continue;
-            const pts = numeric[numeric.length - 1];
-            totals[name] = pts;
-
-            // Ensure we have a player object even if there was no roster
-            if (!players.some(p => p.name === name)) {
-              players.push({ name, handicap: 0, gender: genderMap[name] || 'M' });
-            }
-          }
-        }
-
-        // ---- 4. Per-hole Stableford + handicap + totals from individual cards ----
-        const holeData = {};
-        for (let pi = 0; pi < players.length; pi++) {
-          const p = players[pi];
-          let found = false;
-
-          for (let i = 0; i < lines.length - 1; i++) {
-            const row = lines[i];
-            if (!row) continue;
-            if ((row[0] || '').trim() === p.name) {
-              const stRow = lines[i + 1] || [];
-
-              // Find "Stableford" cell
-              let stIndex = -1;
-              for (let j = 0; j < stRow.length; j++) {
-                if (String(stRow[j]).trim().toLowerCase() === 'stableford') {
-                  stIndex = j;
-                  break;
-                }
-              }
-              if (stIndex < 0) continue;
-
-              const perHole = readStablefordPerHole(stRow);
-              const back9 = perHole.slice(9).reduce((a, b) => a + (Number(b) || 0), 0);
-
-              const hcapCard = toNum(stRow[stIndex + 1]);
-              let totalFromCard = NaN;
-              // Last numeric value after the Stableford label = total points
-              for (let j = stRow.length - 1; j > stIndex; j--) {
-                const v = toNum(stRow[j]);
-                if (Number.isFinite(v)) {
-                  totalFromCard = v;
-                  break;
-                }
-              }
-
-              holeData[p.name] = { perHole, back9, hcapCard, totalFromCard };
-              found = true;
-              break;
-            }
-          }
-
-          if (!found) {
-            holeData[p.name] = {
-              perHole: Array(18).fill(0),
-              back9: 0,
-              hcapCard: NaN,
-              totalFromCard: NaN
-            };
-          }
-        }
-
-        // ---- 5. Build final players array ----
-        const cleanedPlayers = players.filter(p =>
-          p.name &&
-          !/^player$/i.test(p.name.trim()) &&
-          !isTeamLike(p.name)
-        );
-
-        return {
-          players: cleanedPlayers.map(p => {
-            const card = holeData[p.name] || {};
-            const hcapCard = card.hcapCard;
-            let handicap = Number.isFinite(p.handicap) ? p.handicap : NaN;
-
-            // Prefer roster handicap, fall back to card handicap
-            if (!Number.isFinite(handicap) || handicap <= 0) {
-              handicap = Number.isFinite(hcapCard) ? hcapCard : 0;
-            }
-
-            const ptsSummary = totals[p.name];
-            const cardTotal = card.totalFromCard;
-            let points = 0;
-            if (Number.isFinite(ptsSummary)) points = ptsSummary;
-            else if (Number.isFinite(cardTotal)) points = cardTotal;
-
-            return {
-              name: p.name,
-              gender: p.gender || genderMap[p.name] || 'M',
-              handicap,
-              points,
-              back9: card.back9 || 0,
-              perHole: card.perHole || []
-            };
-          }),
-
-          // Pars and static yardages for Chart Hills
-          parsMen: parsedPars,
-          parsWomen: parsedPars,
-          yardsMen: COURSE_YARDS_MEN,
-          yardsWomen: COURSE_YARDS_WOMEN,
-          strokeIndex: COURSE_STROKE_INDEX
-        };
-      }
-
-      // Countback
-      function compareByCountback(a,b){
-        const pa=(a.perHole||[]).slice(0,18), pb=(b.perHole||[]).slice(0,18);
-        const sum=(arr,s,e)=>arr.slice(s,e).reduce((x,y)=>x+(Number(y)||0),0);
-        const aB9=sum(pa,9,18), bB9=sum(pb,9,18); if(aB9!==bB9) return bB9-aB9;
-        const aL6=sum(pa,12,18), bL6=sum(pb,12,18); if(aL6!==bL6) return bL6-aL6;
-        const aL3=sum(pa,15,18), bL3=sum(pb,15,18); if(aL3!==bL3) return bL3-aL3;
-        for(let i=17;i>=0;i--){ const ai=Number(pa[i])||0, bi=Number(pb[i])||0; if(ai!==bi) return bi-ai; }
-        return 0;
-      }
-
-      // ---------- App ----------
-      function App(){
-        const [view,setView] = useState('home'); // home | past | event | ratings | standings | eclectic | holes
-
-        // Supabase
-        const defaultURL="https://mqknahdfpqxrpgpxqtus.supabase.co";
-        const defaultKEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
-        const [client,setClient] = useState(null);
-        const [statusMsg,setStatusMsg] = useState('Connecting…');
-
-        // bucket + folder
-        const BUCKET='winter_league';
-        const PREFIX='events';
-        const [shared,setShared]=useState([]);
-        const [sharedGroups,setSharedGroups]=useState([]);
-
-        const [eventName,setEventName]=useState('Wednesday Winter League');
-        const [players,setPlayers]=useState([]);
-        const [season,setSeason]=useState({});
-        const [coursePars,setCoursePars] = useState({
-          men: COURSE_DEFAULT_MEN,
-          women: COURSE_DEFAULT_WOMEN
+        const c = window.supabase.createClient(SUPA_URL, SUPA_KEY, {
+          auth: { persistSession: false }
         });
-        const [courseYards, setCourseYards] = useState({
-          men: COURSE_YARDS_MEN,
-          women: COURSE_YARDS_WOMEN
+
+        if (cancelled) return;
+        setClient(c);
+
+        const probe = await c.from('winter_league_standings').select('name').limit(1);
+        if (probe.error) {
+          setStatusMsg('Error: ' + probe.error.message);
+        } else {
+          setStatusMsg("Connected");
+          await refreshShared(c);
+          await fetchSeason(c);
+        }
+      } catch (err) {
+        if (!cancelled) setStatusMsg("Error: " + (err?.message || err));
+      }
+    }
+
+    boot();
+    return () => { cancelled = true };
+  }, []);
+
+  // ---------------------------
+  // Load shared events from Supabase Storage
+  // ---------------------------
+  async function refreshShared(c) {
+    c = c || client;
+    if (!c) return;
+
+    const r = await c.storage.from(BUCKET).list(PREFIX, {
+      limit: 1000,
+      sortBy: { column: "name", order: "asc" }
+    });
+
+    if (r.error) {
+      toast("Storage error: " + r.error.message);
+      return;
+    }
+
+    const data = (r.data || [])
+      .filter(x => !x.name.startsWith('.') && /\.csv$/i.test(x.name))
+      .map(x => ({
+        name: x.name.replace(/\.csv$/i, ''),
+        file: x.name,
+        path: `${PREFIX}/${x.name}`
+      }));
+
+    setShared(data);
+    setSharedGroups(groupEventsByYear(data));
+  }
+
+  function groupEventsByYear(files) {
+    const groups = {};
+    for (const f of files) {
+      const m = f.name.match(/(20\d{2})/);
+      const year = m ? m[1] : 'Unknown';
+      (groups[year] ||= []).push(f);
+    }
+    return Object.keys(groups)
+      .sort((a,b)=>b.localeCompare(a))
+      .map(y => ({
+        year: y,
+        events: groups[y].sort((a,b)=>a.name.localeCompare(b.name))
+      }));
+  }
+
+  // ---------------------------
+  // Load event from Supabase
+  // ---------------------------
+  async function loadShared(item) {
+    if (!client) return;
+    const r = await client.storage.from(BUCKET).download(item.path);
+    if (r.error) {
+      alert("Download failed: " + r.error.message);
+      return;
+    }
+
+    const text = await r.data.text();
+    const parsed = parseSquabbitCSV(text);
+
+    const ps = parsed.players || [];
+    setPlayers(ps);
+    setSelectedPlayer(ps[0]?.name || '');
+
+    setEventName(item.name);
+    setCoursePars({
+      men: parsed.parsMen || COURSE_DEFAULT_MEN,
+      women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
+    });
+    setCourseYards({
+      men: parsed.yardsMen || COURSE_YARDS_MEN,
+      women: parsed.yardsWomen || COURSE_YARDS_WOMEN
+    });
+
+    setView('event');
+    toast("Event loaded");
+  }
+
+  // ---------------------------
+  // Load season table from Supabase
+  // ---------------------------
+  async function fetchSeason(c) {
+    c = c || client;
+    if (!c) return;
+
+    const r = await c
+      .from('winter_league_standings')
+      .select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
+
+    if (r.error) {
+      setStatusMsg("Error: " + r.error.message);
+      return;
+    }
+
+    const map = {};
+    for (const rec of (r.data || [])) {
+      if (isTeamLike(rec.name)) continue;
+
+      let bph = [];
+      if (Array.isArray(rec.best_per_hole)) bph = rec.best_per_hole;
+      else if (typeof rec.best_per_hole === 'string') {
+        try { bph = JSON.parse(rec.best_per_hole) } catch {}
+      }
+
+      map[rec.name] = {
+        name: rec.name,
+        totalPoints: rec.total_points || 0,
+        events: rec.events || 0,
+        bestEventPoints: rec.best_event_points ?? 0,
+        bestHolePoints: rec.best_hole_points ?? 0,
+        eclecticTotal: rec.eclectic_total ?? 0,
+        bestPerHole: (bph || []).map(n => Number(n)||0)
+      };
+    }
+
+    setSeason(map);
+  }
+
+  // ---------------------------
+  // Import CSV (local)
+  // ---------------------------
+  function importLocalCSV(text, filename) {
+    const parsed = parseSquabbitCSV(text);
+    const ps = parsed.players || [];
+
+    setPlayers(ps);
+    setSelectedPlayer(ps[0]?.name || "");
+    setEventName((filename || "").replace(/\.[^.]+$/, ""));
+
+    setCoursePars({
+      men: parsed.parsMen || COURSE_DEFAULT_MEN,
+      women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
+    });
+    setCourseYards({
+      men: parsed.yardsMen || COURSE_YARDS_MEN,
+      women: parsed.yardsWomen || COURSE_YARDS_WOMEN
+    });
+
+    setView('event');
+  }
+
+  // ---------------------------
+  // Countback helper
+  // ---------------------------
+  function compareByCountback(a,b){
+    const pa=a.perHole||[];
+    const pb=b.perHole||[];
+    const sum=(arr,s,e)=>arr.slice(s,e).reduce((x,y)=>x+(Number(y)||0),0);
+
+    const aB9=sum(pa,9,18), bB9=sum(pb,9,18);
+    if(aB9!==bB9) return bB9-aB9;
+
+    const aL6=sum(pa,12,18), bL6=sum(pb,12,18);
+    if(aL6!==bL6) return bL6-aL6;
+
+    const aL3=sum(pa,15,18), bL3=sum(pb,15,18);
+    if(aL3!==bL3) return bL3-aL3;
+
+    for(let i=17;i>=0;i--){
+      const ai=Number(pa[i])||0, bi=Number(pb[i])||0;
+      if(ai!==bi) return bi-ai;
+    }
+    return 0;
+  }
+
+  // ---------------------------
+  // Compute event leaderboard
+  // ---------------------------
+  const computed = useMemo(() => {
+    if (!players.length) return [];
+
+    const rows = players.map((p,i)=>({
+      idx:i,
+      name:p.name,
+      gender:p.gender,
+      startExact:p.handicap,
+      points:p.points,
+      back9:p.back9,
+      perHole:p.perHole
+    }));
+
+    const base=[...rows].sort((a,b)=>(b.points-a.points)||compareByCountback(a,b));
+
+    const groups=[];
+    const used=new Set();
+
+    for(const r of base){
+      if(used.has(r.idx)) continue;
+      const grpIdxs=base.filter(x=>x.points===r.points).map(x=>x.idx);
+      grpIdxs.forEach(id=>used.add(id));
+      groups.push(grpIdxs);
+    }
+
+    const topGroup = groups[0].map(i=>rows.find(r=>r.idx===i));
+    let best=[topGroup[0]];
+    for(let k=1;k<topGroup.length;k++){
+      const cmp=compareByCountback(topGroup[k],best[0]);
+      if(cmp>0) best=[topGroup[k]];
+      else if(cmp===0) best.push(topGroup[k]);
+    }
+    const winnerIdxSet=new Set(best.map(r=>r.idx));
+
+    let pos=1;
+    const out=[];
+
+    for(let gi=0; gi<groups.length; gi++){
+      const g=groups[gi];
+      const start=pos;
+      const ptsValue = POINTS_TABLE[start-1] || 0;
+
+      for(const i of g){
+        const r = rows.find(x=>x.idx===i);
+        const isWinner = winnerIdxSet.has(i) && gi===0;
+
+        const hc = computeNewExactHandicap(r.startExact, r.gender, r.points, r.back9, isWinner);
+
+        out.push({
+          ...r,
+          position:start,
+          leaguePoints:ptsValue,
+          isWinner,
+          nextExact:hc.nextExact,
+          nextPlaying:hc.nextPlaying
         });
-        const [selectedPlayer, setSelectedPlayer] = useState('');
-        const fileInputRef = useRef(null);
-
-        useEffect(()=>{ // init supabase + fetch
-          let cancelled=false;
-          async function boot(){
-            try{
-              if(!(window.supabase && window.supabase.createClient)){ setTimeout(boot,250); return; }
-              const c = window.supabase.createClient(defaultURL, defaultKEY, { auth:{ persistSession:false }});
-              if(cancelled) return; setClient(c);
-              const probe = await c.from('winter_league_standings').select('name').limit(1);
-              if(cancelled) return;
-              if(probe.error){ setStatusMsg('Error: '+probe.error.message); }
-              else{ setStatusMsg('Connected'); await refreshShared(c); await fetchSeasonWith(c); }
-            }catch(e){ if(!cancelled) setStatusMsg('Error: '+(e?.message||e)); }
-          }
-          boot();
-          return ()=>{cancelled=true};
-        },[]);
-
-        async function refreshShared(c){
-          c = c || client;
-          if (!c) return;
-
-          const r = await c.storage
-            .from(BUCKET)
-            .list(PREFIX, { limit:1000, sortBy:{column:'name', order:'asc'} });
-
-          if (r.error) {
-            console.error('Storage list error:', r.error);
-            toast('Storage error: ' + r.error.message);
-            return;
-          }
-
-          const data=(r.data||[])
-            .filter(x=>!x.name.startsWith('.') && /\.csv$/i.test(x.name))
-            .map(x=>({ name:x.name.replace(/\.csv$/i,''), file:x.name, path: PREFIX+'/'+x.name }));
-          setShared(data);
-          setSharedGroups(groupByYear(data));
-        }
-
-        function groupByYear(files){
-          const groups={};
-          for(const f of files){
-            const m=f.name.match(/(20\d{2})/);
-            const year=m?m[1]:'Unknown';
-            (groups[year]=groups[year]||[]).push(f);
-          }
-          return Object.keys(groups)
-            .sort((a,b)=>b.localeCompare(a))
-            .map(y=>({
-              year:y,
-              events:groups[y].sort((a,b)=>a.name.localeCompare(b.name))
-            }));
-        }
-
-        async function loadShared(item){
-          if(!client) return;
-          const r=await client.storage.from(BUCKET).download(item.path);
-          if(r.error){ alert('Download failed: '+r.error.message); return; }
-          const text=await r.data.text();
-          const parsed=parseSquabbitCSV(text);
-          const ps = parsed.players || [];
-          setPlayers(ps);
-          setEventName(item.name);
-          setCoursePars({
-            men: parsed.parsMen || COURSE_DEFAULT_MEN,
-            women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
-          });
-          setCourseYards({
-            men: parsed.yardsMen || COURSE_YARDS_MEN,
-            women: parsed.yardsWomen || COURSE_YARDS_WOMEN
-          });
-          setSelectedPlayer(ps[0]?.name || '');
-          setView('event'); // go to event screen
-          toast('Event loaded');
-        }
-
-        // computed event outcomes
-        const computed = useMemo(()=>{
-          const rows=players.map((p,i)=>({
-            idx:i,
-            name:p.name,
-            gender:p.gender,
-            startExact:p.handicap,
-            points:p.points,
-            back9:p.back9,
-            perHole:p.perHole
-          }));
-          const base=[...rows].sort((a,b)=>(b.points-a.points)||(compareByCountback(a,b)));
-          if(!base.length) return [];
-          const groups=[]; const used=new Set();
-          for(const r of base){
-            if(used.has(r.idx)) continue;
-            const grpIdxs=base.filter(x=>x.points===r.points).map(x=>x.idx);
-            grpIdxs.forEach(id=>used.add(id));
-            groups.push(grpIdxs);
-          }
-          const topGroup=groups[0].map(i=>rows.find(r=>r.idx===i));
-          let best=[topGroup[0]];
-          for(let k=1;k<topGroup.length;k++){
-            const cmp=compareByCountback(topGroup[k],best[0]);
-            if(cmp>0) best=[topGroup[k]];
-            else if(cmp===0) best.push(topGroup[k]);
-          }
-          const winnerIdxSet=new Set(best.map(r=>r.idx));
-
-          let pos=1; const out=[];
-          for(let gIdx=0; gIdx<groups.length; gIdx++){
-            const g=groups[gIdx];
-            const start=pos;
-            const ptsValue=POINTS_TABLE[start-1]||0;
-            for(const i of g){
-              const r=rows.find(x=>x.idx===i);
-              const isWinner=winnerIdxSet.has(i) && (gIdx===0);
-              const res=computeNewExactHandicap(r.startExact,r.gender,r.points,r.back9,isWinner);
-              out.push({
-                ...r,
-                position:start,
-                leaguePoints:ptsValue,
-                isWinner,
-                nextExact:res.nextExact,
-                nextPlaying:res.nextPlaying
-              });
-            }
-            pos+=g.length;
-          }
-          return out.sort((a,b)=>a.position-b.position);
-        },[players]);
-
-        // Field baseline per hole: average Stableford points by hole
-        const holeFieldStats = useMemo(() => {
-          if (!players.length) return [];
-
-          const menPars   = coursePars.men   || COURSE_DEFAULT_MEN;
-          const womenPars = coursePars.women || COURSE_DEFAULT_WOMEN;
-          const menYards  = courseYards.men  || COURSE_YARDS_MEN;
-          const womenYards= courseYards.women|| COURSE_YARDS_WOMEN;
-
-          const nHoles = 18;
-          const stats = Array.from({ length: nHoles }, (_, i) => ({
-            hole: i + 1,
-            parMen: menPars[i] || 4,
-            parWomen: womenPars[i] || menPars[i] || 4,
-            yardsMen: menYards[i] || null,
-            yardsWomen: womenYards[i] || null,
-            si: COURSE_STROKE_INDEX[i] || null,
-            totalPts: 0,
-            count: 0
-          }));
-
-          players.forEach(p => {
-            const perHole = p.perHole || [];
-            for (let i = 0; i < nHoles; i++) {
-              const pts = Number(perHole[i]) || 0;
-              stats[i].totalPts += pts;
-              stats[i].count++;
-            }
-          });
-
-          stats.forEach(h => {
-            h.avgFieldPts = h.count ? h.totalPts / h.count : 0;
-          });
-
-          return stats;
-        }, [players, coursePars, courseYards]);
-
-        // Player-specific stats vs field, per hole + by distance bucket
-        const playerHoleStats = useMemo(() => {
-          if (!selectedPlayer || !players.length || !holeFieldStats.length) return null;
-
-          const p = players.find(pl => pl.name === selectedPlayer);
-          if (!p) return null;
-
-          const perHole = p.perHole || [];
-          const menPars   = coursePars.men   || COURSE_DEFAULT_MEN;
-          const womenPars = coursePars.women || COURSE_DEFAULT_WOMEN;
-          const menYards  = courseYards.men  || COURSE_YARDS_MEN;
-          const womenYards= courseYards.women|| COURSE_YARDS_WOMEN;
-
-          const isFemale = (p.gender === 'F');
-          const pars   = isFemale ? (womenPars || menPars) : menPars;
-          const yards  = isFemale ? (womenYards || menYards) : menYards;
-
-          const classifyByDistance = (par, y) => {
-            if (!y) return '';
-            if (par === 3) {
-              if (y < 150) return 'Short par 3';
-              if (y <= 180) return 'Mid par 3';
-              return 'Long par 3';
-            }
-            if (par === 4) {
-              if (y < 360) return 'Short par 4';
-              if (y <= 410) return 'Mid par 4';
-              return 'Long par 4';
-            }
-            if (par === 5) {
-              if (y < 500) return 'Reachable par 5';
-              return 'Long par 5';
-            }
-            return '';
-          };
-
-          const holes = holeFieldStats.map((h, i) => {
-            const pts = Number(perHole[i]) || 0;
-            const par = pars[i] || 4;
-            const yds = yards[i] || null;
-            const fieldAvg = h.avgFieldPts || 0;
-            const diffVsField = pts - fieldAvg; // +ve = better than field
-
-            return {
-              hole: i + 1,
-              par,
-              yards: yds,
-              si: COURSE_STROKE_INDEX[i] || null,
-              pts,
-              fieldAvg,
-              diffVsField,
-              bucket: classifyByDistance(par, yds)
-            };
-          });
-
-          // Aggregation by distance bucket
-          const bucketMap = {};
-          holes.forEach(h => {
-            const key = h.bucket || 'Other';
-            if (!bucketMap[key]) {
-              bucketMap[key] = { name: key, totalPts: 0, totalField: 0, count: 0 };
-            }
-            bucketMap[key].totalPts += h.pts;
-            bucketMap[key].totalField += h.fieldAvg;
-            bucketMap[key].count++;
-          });
-
-          const buckets = Object.values(bucketMap).map(b => ({
-            ...b,
-            avgPts: b.count ? b.totalPts / b.count : 0,
-            avgField: b.count ? b.totalField / b.count : 0,
-            diffVsField: b.count ? (b.totalPts - b.totalField) / b.count : 0
-          }));
-
-          return { player: p, holes, buckets };
-        }, [selectedPlayer, players, holeFieldStats, coursePars, courseYards]);
-
-        async function fetchSeasonWith(c){
-          const r = await c
-            .from('winter_league_standings')
-            .select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
-          if(r.error){
-            setStatusMsg('Error: '+r.error.message);
-            return;
-          }
-          const data=r.data||[];
-          const map={};
-          for(const rec of data){
-            if(isTeamLike(rec.name)) continue;
-            let bph=[];
-            if(Array.isArray(rec.best_per_hole)) bph=rec.best_per_hole;
-            else if(typeof rec.best_per_hole==='string'){
-              try{ bph=JSON.parse(rec.best_per_hole||'[]')||[]; }catch(e){ bph=[]; }
-            }
-            map[rec.name]={
-              name:rec.name,
-              totalPoints:rec.total_points||0,
-              events:rec.events||0,
-              bestEventPoints:rec.best_event_points??0,
-              bestHolePoints:rec.best_hole_points??0,
-              eclecticTotal:rec.eclectic_total??0,
-              bestPerHole:(bph||[]).map(n=>Number(n)||0)
-            };
-          }
-          setSeason(map);
-        }
-
-        async function addEventToSeason(){
-          if(!computed.length){ toast('Load an event first'); return; }
-          const next={ ...season };
-          for(const r of computed){
-            if(isTeamLike(r.name)) continue;
-            const prev=next[r.name]||{
-              name:r.name,
-              totalPoints:0,
-              events:0,
-              bestPerHole:Array(18).fill(0),
-              eclecticTotal:0,
-              bestEventPoints:0,
-              bestHolePoints:0
-            };
-            const eventPerHole=(r.perHole||[])
-              .map(v=>Math.max(0,Math.min(6,Number(v)||0)));
-            const bestPerHole=Array.from(
-              {length:18},
-              (_,idx)=>Math.max(prev.bestPerHole[idx]||0,eventPerHole[idx]||0)
-            );
-            const eclecticTotal=bestPerHole.reduce((s,v)=>s+(Number(v)||0),0);
-            const nextBestEvent=Math.max(prev.bestEventPoints||0,r.points||0);
-            const nextBestHole=Math.max(
-              prev.bestHolePoints||0,
-              Math.max.apply(null,[0].concat(eventPerHole))
-            );
-            next[r.name]={
-              name:r.name,
-              totalPoints:(prev.totalPoints||0)+(r.leaguePoints||0),
-              events:(prev.events||0)+1,
-              bestEventPoints:nextBestEvent,
-              bestHolePoints:nextBestHole,
-              eclecticTotal,
-              bestPerHole
-            };
-          }
-          setSeason(next);
-          if(client){
-            const rows=[];
-            const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
-            for(const r of vals){
-              rows.push({
-                name:r.name,
-                total_points:r.totalPoints|0,
-                events:r.events|0,
-                best_event_points:(r.bestEventPoints??0)|0,
-                best_hole_points:(r.bestHolePoints??0)|0,
-                eclectic_total:(r.eclecticTotal??0)|0,
-                best_per_hole:Array.isArray(r.bestPerHole)
-                  ? r.bestPerHole.map(n=>Number(n)||0)
-                  : Array(18).fill(0)
-              });
-            }
-            const u = await client
-              .from('winter_league_standings')
-              .upsert(rows,{onConflict:'name'});
-            if(u.error){ toast('Error: '+u.error.message); }
-            else { toast('Event added to season ✓'); }
-          }
-        }
-
-        // wipe whole season
-        async function clearSeason(){
-          if(!client){ toast('No Supabase client'); return; }
-          if(!window.confirm('This will delete ALL season standings. Are you sure?')) return;
-          const { error } = await client
-            .from('winter_league_standings')
-            .delete()
-            .neq('name','');
-          if(error){ toast('Error: '+error.message); return; }
-          setSeason({});
-          toast('Season cleared');
-        }
-
-        // remove current event from season (approximate rollback)
-        async function removeEventFromSeason(){
-          if(!computed.length){ toast('Load an event first'); return; }
-          if(!window.confirm('Remove this event from the season standings?')) return;
-
-          const next={ ...season };
-
-          for(const r of computed){
-            if(isTeamLike(r.name)) continue;
-            const prev = next[r.name];
-            if(!prev) continue;
-
-            const newTotal = (prev.totalPoints||0) - (r.leaguePoints||0);
-            const newEvents = Math.max(0,(prev.events||0)-1);
-
-            if(newTotal<=0 && newEvents===0){
-              delete next[r.name];
-            } else {
-              next[r.name] = {
-                ...prev,
-                totalPoints:newTotal,
-                events:newEvents
-                // bestEventPoints / bestHolePoints / eclecticTotal left as-is
-              };
-            }
-          }
-
-          const oldSeason = season;
-          setSeason(next);
-
-          if(client){
-            const removedNames = Object.keys(oldSeason)
-              .filter(name => !next[name]);
-            if(removedNames.length){
-              const { error: delErr } = await client
-                .from('winter_league_standings')
-                .delete()
-                .in('name', removedNames);
-              if(delErr){ toast('Error: '+delErr.message); return; }
-            }
-
-            const rows=[];
-            const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
-            for(const r of vals){
-              rows.push({
-                name:r.name,
-                total_points:r.totalPoints|0,
-                events:r.events|0,
-                best_event_points:(r.bestEventPoints??0)|0,
-                best_hole_points:(r.bestHolePoints??0)|0,
-                eclectic_total:(r.eclecticTotal??0)|0,
-                best_per_hole:Array.isArray(r.bestPerHole)
-                  ? r.bestPerHole.map(n=>Number(n)||0)
-                  : Array(18).fill(0)
-              });
-            }
-            const { error: upErr } = await client
-              .from('winter_league_standings')
-              .upsert(rows,{onConflict:'name'});
-            if(upErr){ toast('Error: '+upErr.message); }
-            else { toast('Event removed from season ✓'); }
-          }
-        }
-
-        function exportEventCSV(){
-          if(!computed.length){ toast('Load an event first'); return; }
-          const rows=[["Name","Gender","Exact","Stableford","Back9","Pos","Pts","NextExact","NextPlay"]];
-          computed.forEach(r=>rows.push([
-            r.name,
-            r.gender,
-            Math.round(r.startExact),
-            r.points,
-            r.back9,
-            r.position,
-            r.leaguePoints,
-            r.nextExact.toFixed(1),
-            r.nextPlaying
-          ]));
-          downloadCSV(
-            `WednesdayWinterLeague_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,
-            rows
-          );
-        }
-
-        // ---------- UI ----------
-        function Header(){
-          return (
-            <header className="hide-print rounded-2xl p-4 border border-squab-700 bg-squab-600 text-white">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h1 className="text-xl md:text-2xl font-bold tracking-tight">
-                    Wednesday Winter League — League & Eclectic
-                  </h1>
-                  <p className="text-xs/5 text-white/90">Supabase: {statusMsg}</p>
-                </div>
-                <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">
-                  {eventName||'Untitled Event'}
-                </span>
-              </div>
-            </header>
-          );
-        }
-
-        function Home(){
-          const [open,setOpen]=useState(true);
-          const canAct = computed.length>0;
-
-          return (
-            <section className="rounded-2xl p-3 md:p-4 panel-mint shadow-sm">
-              <button
-                type="button"
-                className="w-full bg-white text-neutral-900 border border-squab-200 rounded-xl px-4 py-3 flex items-center justify-between"
-                onClick={()=>setOpen(v=>!v)}
-                aria-expanded={open?'true':'false'}
-              >
-                <span className="font-semibold">Menu</span>
-                <span className={`transition-transform ${open?'rotate-180':''}`}>▾</span>
-              </button>
-
-              <div className={`overflow-hidden transition-all ${open?'max-h-[2000px]':'max-h-0'}`}>
-                <div className="mt-3 grid gap-2">
-                  <button
-                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
-                    onClick={()=>setView('past')}
-                  >
-                    Load Past Golf Event to Analyse
-                  </button>
-                  <button
-                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
-                    onClick={()=>setView('ratings')}
-                  >
-                    View Player Ratings
-                  </button>
-                  <button
-                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
-                    onClick={()=>setView('holes')}
-                  >
-                    Player Hole Analysis
-                  </button>
-                  <button
-                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
-                    onClick={()=>setView('standings')}
-                  >
-                    Check Season Standings
-                  </button>
-                  <button
-                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
-                    onClick={()=>setView('eclectic')}
-                  >
-                    Check Eclectic Leaderboard
-                  </button>
-
-                  <button
-                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
-                    onClick={()=>{ fileInputRef.current && fileInputRef.current.click(); }}
-                  >
-                    Import CSV
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    className="hidden"
-                    onChange={async e=>{
-                      try{
-                        const f=e.target.files&&e.target.files[0];
-                        if(!f) return;
-                        const text=await f.text();
-                        const parsed=parseSquabbitCSV(text);
-                        const ps = parsed.players || [];
-                        setPlayers(ps);
-                        setEventName((f.name||'').replace(/\.[^.]+$/,''));
-                        setCoursePars({
-                          men: parsed.parsMen || COURSE_DEFAULT_MEN,
-                          women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
-                        });
-                        setCourseYards({
-                          men: parsed.yardsMen || COURSE_YARDS_MEN,
-                          women: parsed.yardsWomen || COURSE_YARDS_WOMEN
-                        });
-                        setSelectedPlayer(ps[0]?.name || '');
-                        setView('event');
-                        e.target.value='';
-                      }catch(err){
-                        toast('Bad CSV');
-                        console.error(err);
-                      }
-                    }}
-                  />
-
-                  <button
-                    className={`w-full text-left rounded-xl border px-3 py-2 ${
-                      canAct
-                        ? 'border-squab-200 bg-white'
-                        : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
-                    }`}
-                    onClick={addEventToSeason}
-                    disabled={!canAct}
-                  >
-                    Add Event → Season
-                  </button>
-
-                  <button
-                    className={`w-full text-left rounded-xl border px-3 py-2 ${
-                      canAct
-                        ? 'border-amber-300 bg-amber-50 text-amber-800'
-                        : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
-                    }`}
-                    onClick={removeEventFromSeason}
-                    disabled={!canAct}
-                  >
-                    Remove Event ← Season
-                  </button>
-
-                  <button
-                    className={`w-full text-left rounded-xl border px-3 py-2 ${
-                      canAct
-                        ? 'border-squab-200 bg-white'
-                        : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
-                    }`}
-                    onClick={exportEventCSV}
-                    disabled={!canAct}
-                  >
-                    Download CSV
-                  </button>
-
-                  <button
-                    className="w-full text-left rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-red-700"
-                    onClick={clearSeason}
-                  >
-                    Delete Entire Season
-                  </button>
-                </div>
-              </div>
-            </section>
-          );
-        }
-
-        function PastEvents(){
-          return (
-            <section className="rounded-2xl p-3 md:p-4 bg-white border border-squab-200 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-lg font-semibold text-squab-900">
-                  Past Wednesday Winter League Games
-                </h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
-                  Back
-                </button>
-              </div>
-              {sharedGroups.length===0 && (
-                <div className="text-sm text-neutral-600 p-2">No shared CSVs yet.</div>
-              )}
-              {sharedGroups.map(group=> (
-                <div key={group.year} className="mb-3">
-                  <div className="text-xs text-neutral-600 mb-1">{group.year}</div>
-                  <select
-                    className="w-full rounded-xl border border-squab-200 px-3 py-2 bg-white"
-                    onChange={async e=>{
-                      const idx=e.target.value;
-                      if(idx==='') return;
-                      const item=group.events[Number(idx)];
-                      await loadShared(item);
-                    }}
-                  >
-                    <option value="">Select an event…</option>
-                    {group.events.map((item,i)=> (
-                      <option key={item.path} value={i}>{item.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </section>
-          );
-        }
-
-        function EventScreen(){
-          return (
-            <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">
-                  Event — {eventName || 'Selected Event'}
-                </h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('past')}>
-                  Back
-                </button>
-              </div>
-
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="sticky top-0 bg-white z-10">
-                    <tr className="border-b border-squab-200 text-left">
-                      <th>#</th>
-                      <th>Name</th>
-                      <th>Handicap</th>
-                      <th>Stableford</th>
-                      <th>Back9</th>
-                      <th>Pts</th>
-                      <th>New Handicap</th>
-                    </tr>
-                  </thead>
-                  <tbody className="[&_tr:nth-child(even)]:bg-squab-50">
-                    {computed.length===0 && (
-                      <tr>
-                        <td colSpan="7" className="py-3 text-neutral-600">
-                          Pick an event to see players.
-                        </td>
-                      </tr>
-                    )}
-                    {computed.map((r,i)=>(
-                      <tr key={i} className="border-b border-squab-200">
-                        <td>{r.position}</td>
-                        <td className="whitespace-nowrap">{r.name}</td>
-                        <td>{Math.round(r.startExact)}</td>
-                        <td>{r.points}</td>
-                        <td>{r.back9}</td>
-                        <td>{r.leaguePoints}</td>
-                        <td>{r.nextPlaying}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-xs text-neutral-600 mt-2">
-                Ties share the highest slot. Winner by countback: Back 9 → Last 6 → Last 3 → 18th → 17th … 1st.
-              </p>
-            </section>
-          );
-        }
-
-        function Ratings(){
-          const menPars   = coursePars.men   || COURSE_DEFAULT_MEN;
-          const womenPars = coursePars.women || COURSE_DEFAULT_WOMEN;
-
-          const ratingLabel = avg =>
-            avg>=3   ? 'Excellent' :
-            avg>=2.5 ? 'Good'      :
-            avg>=2   ? 'Solid'     :
-            avg>=1.5 ? 'Needs work': 'Struggle';
-
-          const badgeClass = avg =>
-            avg>=3   ? 'bg-emerald-100 text-emerald-800' :
-            avg>=2.5 ? 'bg-emerald-50 text-emerald-700'  :
-            avg>=2   ? 'bg-neutral-100 text-neutral-800' :
-            avg>=1.5 ? 'bg-amber-100 text-amber-800'     :
-                       'bg-red-100 text-red-800';
-
-          const eventParAverages=(perHole,pars)=>{
-            const sums={3:{s:0,c:0},4:{s:0,c:0},5:{s:0,c:0}};
-            for(let i=0;i<Math.min(18,perHole.length,pars.length);i++){
-              const pts=Number(perHole[i])||0;
-              const par=Number(pars[i])||4;
-              if(sums[par]){
-                sums[par].s+=pts;
-                sums[par].c++;
-              }
-            }
-            const avg=t=>sums[t].c?(sums[t].s/sums[t].c):0;
-            return {p3:avg(3),p4:avg(4),p5:avg(5)};
-          };
-
-          const ratings = React.useMemo(()=>{
-            const out=[];
-            for(const r of computed){
-              const pars = (r.gender==='F') ? womenPars : menPars;
-              const av = eventParAverages(r.perHole||[], pars);
-              out.push({
-                name: r.name,
-                p3: to1(av.p3),
-                p4: to1(av.p4),
-                p5: to1(av.p5),
-                total: to1(av.p3 + av.p4 + av.p5)
-              });
-            }
-            return out.sort((a,b)=> b.total-a.total || a.name.localeCompare(b.name));
-          },[computed, menPars, womenPars]);
-
-          return (
-            <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">
-                  Player Ratings — {eventName||'This Event'}
-                </h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
-                  Back
-                </button>
-              </div>
-
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-squab-200 text-left">
-                      <th>Name</th>
-                      <th>Par-3 avg</th>
-                      <th>Par-3 rating</th>
-                      <th>Par-4 avg</th>
-                      <th>Par-4 rating</th>
-                      <th>Par-5 avg</th>
-                      <th>Par-5 rating</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ratings.length===0 && (
-                      <tr>
-                        <td colSpan="7" className="py-3 text-neutral-600">
-                          Import a Squabbit CSV or pick one from Past Events to see ratings.
-                        </td>
-                      </tr>
-                    )}
-                    {ratings.map(r=> (
-                      <tr key={r.name} className="border-b border-squab-200">
-                        <td className="font-medium">{r.name}</td>
-
-                        <td>{r.p3.toFixed(1)}</td>
-                        <td>
-                          <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${badgeClass(r.p3)}`}>
-                            {ratingLabel(r.p3)}
-                          </span>
-                        </td>
-
-                        <td>{r.p4.toFixed(1)}</td>
-                        <td>
-                          <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${badgeClass(r.p4)}`}>
-                            {ratingLabel(r.p4)}
-                          </span>
-                        </td>
-
-                        <td>{r.p5.toFixed(1)}</td>
-                        <td>
-                          <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${badgeClass(r.p5)}`}>
-                            {ratingLabel(r.p5)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          );
-        }
-
-        function Standings(){
-          const list = Object.values(season)
-            .filter(r=>!isTeamLike(r.name))
-            .sort((a,b)=>(b.totalPoints-a.totalPoints)||a.name.localeCompare(b.name));
-          return (
-            <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">Season Standings</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
-                  Back
-                </button>
-              </div>
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-squab-200 text-left">
-                      <th>Rank</th>
-                      <th>Name</th>
-                      <th>Events</th>
-                      <th>Total</th>
-                      <th>Best Event</th>
-                      <th>Best Hole</th>
-                      <th>Eclectic</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.length===0 && (
-                      <tr>
-                        <td colSpan="7" className="py-3 text-neutral-600">
-                          No season data found.
-                        </td>
-                      </tr>
-                    )}
-                    {list.map((r,i)=>(
-                      <tr key={r.name} className="border-b border-squab-200">
-                        <td>{i+1}</td>
-                        <td>{r.name}</td>
-                        <td>{r.events}</td>
-                        <td>{r.totalPoints}</td>
-                        <td>{r.bestEventPoints??0}</td>
-                        <td>{r.bestHolePoints??0}</td>
-                        <td>{r.eclecticTotal??0}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          );
-        }
-
-        function Eclectic(){
-          const list = Object.values(season)
-            .filter(r=>!isTeamLike(r.name))
-            .sort((a,b)=>((b.eclecticTotal??0)-(a.eclecticTotal??0))||a.name.localeCompare(b.name));
-          return (
-            <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">Eclectic Leaderboard</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
-                  Back
-                </button>
-              </div>
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-squab-200 text-left">
-                      <th>Rank</th>
-                      <th>Name</th>
-                      <th>Eclectic Total</th>
-                      {Array.from({length:18},(_,i)=>(<th key={i}>H{i+1}</th>))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.length===0 && (
-                      <tr>
-                        <td colSpan="21" className="py-3 text-neutral-600">
-                          No eclectic yet.
-                        </td>
-                      </tr>
-                    )}
-                    {list.map((r,i)=>(
-                      <tr key={r.name} className="border-b border-squab-200">
-                        <td>{i+1}</td>
-                        <td>{r.name}</td>
-                        <td>{r.eclecticTotal??0}</td>
-                        {(Array.isArray(r.bestPerHole)?r.bestPerHole:Array(18).fill(0))
-                          .map((v,ix)=>(<td key={ix}>{v}</td>))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          );
-        }
-
-        function PlayerHoleAnalysis(){
-          const stats = playerHoleStats;
-          const allPlayers = players.filter(p => !isTeamLike(p.name));
-
-          const describeDiff = d => {
-            if (d >= 0.6) return 'Big gain vs field';
-            if (d >= 0.25) return 'Gains vs field';
-            if (d > -0.1) return 'About level';
-            if (d > -0.4) return 'Loses a bit';
-            return 'Loses a lot';
-          };
-
-          const diffClass = d => {
-            if (d >= 0.6) return 'bg-emerald-200 text-emerald-900';
-            if (d >= 0.25) return 'bg-emerald-100 text-emerald-800';
-            if (d > -0.1) return 'bg-neutral-100 text-neutral-800';
-            if (d > -0.4) return 'bg-amber-100 text-amber-800';
-            return 'bg-red-100 text-red-800';
-          };
-
-          if (!allPlayers.length) {
-            return (
-              <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold text-squab-900">
-                    Player hole analysis
-                  </h2>
-                  <button className="btn border border-squab-200" onClick={()=>setView('home')}>
-                    Back
-                  </button>
-                </div>
-                <p className="text-sm text-neutral-600">
-                  Load an event first to see per-player analysis.
-                </p>
-              </section>
-            );
-          }
-
-          const currentPlayerName = selectedPlayer || allPlayers[0].name;
-          const currentStats = (stats && stats.player && stats.player.name === currentPlayerName)
-            ? stats
-            : playerHoleStats; // fallback, but memo should be in sync
-
-          const holes = currentStats?.holes || [];
-          const buckets = currentStats?.buckets || [];
-
-          const gains = [...holes].sort((a,b)=>b.diffVsField - a.diffVsField).slice(0,3);
-          const losses = [...holes].sort((a,b)=>a.diffVsField - b.diffVsField).slice(0,3);
-
-          return (
-            <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">
-                  Player hole analysis — {eventName || 'This Event'}
-                </h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
-                  Back
-                </button>
-              </div>
-
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <label className="text-sm text-neutral-700">
-                  Player:
-                  <select
-                    className="ml-2 rounded-lg border border-squab-200 px-2 py-1 text-sm"
-                    value={currentPlayerName}
-                    onChange={e=>setSelectedPlayer(e.target.value)}
-                  >
-                    {allPlayers.map(p=>(
-                      <option key={p.name} value={p.name}>{p.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="text-xs text-neutral-500">
-                  Values are Stableford points; difference is player minus field average on that hole.
-                </p>
-              </div>
-
-              {holes.length === 0 && (
-                <p className="text-sm text-neutral-600">
-                  No per-hole data found for this player.
-                </p>
-              )}
-
-              {holes.length > 0 && (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2 mb-4 text-xs md:text-sm">
-                    <div className="rounded-xl border border-squab-200 bg-squab-50 p-3">
-                      <h3 className="font-semibold mb-1 text-squab-900 text-sm">
-                        Biggest gains vs field
-                      </h3>
-                      <ul className="space-y-1">
-                        {gains.map(h=>(
-                          <li key={h.hole} className="flex justify-between">
-                            <span>
-                              H{h.hole} • {h.yards || '—'}y • Par {h.par}
-                            </span>
-                            <span className="font-medium">
-                              {h.diffVsField >= 0 ? '+' : ''}{h.diffVsField.toFixed(2)} pts
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="rounded-xl border border-squab-200 bg-squab-50 p-3">
-                      <h3 className="font-semibold mb-1 text-squab-900 text-sm">
-                        Biggest leaks vs field
-                      </h3>
-                      <ul className="space-y-1">
-                        {losses.map(h=>(
-                          <li key={h.hole} className="flex justify-between">
-                            <span>
-                              H{h.hole} • {h.yards || '—'}y • Par {h.par}
-                            </span>
-                            <span className="font-medium">
-                              {h.diffVsField >= 0 ? '+' : ''}{h.diffVsField.toFixed(2)} pts
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <h3 className="font-semibold text-sm text-squab-900 mb-1">
-                      By distance type
-                    </h3>
-                    <div className="overflow-auto">
-                      <table className="min-w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-squab-200 text-left">
-                            <th>Descr</th>
-                            <th>Holes</th>
-                            <th>Avg pts</th>
-                            <th>Field avg</th>
-                            <th>Diff vs field</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {buckets.map(b=>(
-                            <tr key={b.name} className="border-b border-squab-200">
-                              <td>{b.name}</td>
-                              <td>{b.count}</td>
-                              <td>{b.avgPts.toFixed(2)}</td>
-                              <td>{b.avgField.toFixed(2)}</td>
-                              <td>
-                                <span className={`px-2 py-0.5 rounded-lg text-[0.7rem] font-medium ${diffClass(b.diffVsField)}`}>
-                                  {b.diffVsField >= 0 ? '+' : ''}{b.diffVsField.toFixed(2)} ({describeDiff(b.diffVsField)})
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="overflow-auto">
-                    <table className="min-w-full text-xs md:text-sm">
-                      <thead>
-                        <tr className="border-b border-squab-200 text-left">
-                          <th>Hole</th>
-                          <th>Par</th>
-                          <th>SI</th>
-                          <th>Yards</th>
-                          <th>Player pts</th>
-                          <th>Field avg</th>
-                          <th>Diff vs field</th>
-                          <th>Descr</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {holes.map(h=>(
-                          <tr key={h.hole} className="border-b border-squab-200">
-                            <td>H{h.hole}</td>
-                            <td>{h.par}</td>
-                            <td>{h.si ?? ''}</td>
-                            <td>{h.yards || '—'}</td>
-                            <td>{h.pts.toFixed(1)}</td>
-                            <td>{h.fieldAvg.toFixed(2)}</td>
-                            <td>
-                              <span className={`px-2 py-0.5 rounded-lg text-[0.7rem] font-medium ${diffClass(h.diffVsField)}`}>
-                                {h.diffVsField >= 0 ? '+' : ''}{h.diffVsField.toFixed(2)}
-                              </span>
-                            </td>
-                            <td>{h.bucket}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </section>
-          );
-        }
-
-        return (
-          <div className="min-h-screen p-4 sm:p-6">
-            <div className="max-w-4xl mx-auto space-y-4">
-              <Header />
-              {view==='home' && <Home />}
-              {view==='past' && <PastEvents />}
-              {view==='event' && <EventScreen />}
-              {view==='ratings' && <Ratings />}
-              {view==='standings' && <Standings />}
-              {view==='eclectic' && <Eclectic />}
-              {view==='holes' && <PlayerHoleAnalysis />}
-            </div>
+      }
+
+      pos += g.length;
+    }
+
+    return out.sort((a,b)=>a.position-b.position);
+  }, [players]);
+
+  // ---------------------------
+  // Season: Add event
+  // ---------------------------
+  async function addEventToSeason() {
+    if (!computed.length) { toast("Load an event first"); return; }
+    const next = { ...season };
+
+    for (const r of computed) {
+      if (isTeamLike(r.name)) continue;
+
+      const prev = next[r.name] || {
+        name:r.name,
+        totalPoints:0,
+        events:0,
+        bestPerHole:Array(18).fill(0),
+        eclecticTotal:0,
+        bestEventPoints:0,
+        bestHolePoints:0
+      };
+
+      const eventPerHole = (r.perHole||[]).map(v=>Math.max(0,Math.min(6,Number(v)||0)));
+
+      const bestPerHole = prev.bestPerHole.map((v,i)=>Math.max(v,eventPerHole[i]));
+      const eclecticTotal = bestPerHole.reduce((s,v)=>s+v,0);
+      const bestEvent = Math.max(prev.bestEventPoints || 0, r.points || 0);
+      const bestHole = Math.max(prev.bestHolePoints || 0, Math.max(...eventPerHole));
+
+      next[r.name] = {
+        name:r.name,
+        totalPoints:(prev.totalPoints||0)+(r.leaguePoints||0),
+        events:(prev.events||0)+1,
+        bestEventPoints:bestEvent,
+        bestHolePoints:bestHole,
+        eclecticTotal,
+        bestPerHole
+      };
+    }
+
+    setSeason(next);
+
+    if (client) {
+      const vals = Object.values(next).filter(r=>!isTeamLike(r.name));
+      const rows = vals.map(r => ({
+        name:r.name,
+        total_points:r.totalPoints,
+        events:r.events,
+        best_event_points:r.bestEventPoints,
+        best_hole_points:r.bestHolePoints,
+        eclectic_total:r.eclecticTotal,
+        best_per_hole:r.bestPerHole
+      }));
+
+      const res = await client.from('winter_league_standings').upsert(rows, { onConflict: 'name' });
+      if (res.error) toast("Error: " + res.error.message);
+      else toast("Event added to season ✓");
+    }
+  }
+
+  // ---------------------------
+  // Season: Remove event (rollback)
+  // ---------------------------
+  async function removeEventFromSeason() {
+    if (!computed.length) { toast("Load an event first"); return; }
+    if (!window.confirm("Remove this event from the season standings?")) return;
+
+    const next = { ...season };
+    const oldSeason = season;
+
+    for (const r of computed) {
+      const prev = next[r.name];
+      if (!prev) continue;
+
+      const newTotal = prev.totalPoints - r.leaguePoints;
+      const newEvents = Math.max(0, prev.events - 1);
+
+      if (newTotal <= 0 && newEvents === 0) {
+        delete next[r.name];
+      } else {
+        next[r.name] = { ...prev, totalPoints:newTotal, events:newEvents };
+      }
+    }
+
+    setSeason(next);
+
+    if (client) {
+      const removedNames = Object.keys(oldSeason).filter(k => !next[k]);
+      if (removedNames.length) {
+        await client.from('winter_league_standings').delete().in('name', removedNames);
+      }
+
+      const vals = Object.values(next).filter(r=>!isTeamLike(r.name));
+      const rows = vals.map(r => ({
+        name:r.name,
+        total_points:r.totalPoints,
+        events:r.events,
+        best_event_points:r.bestEventPoints,
+        best_hole_points:r.bestHolePoints,
+        eclectic_total:r.eclecticTotal,
+        best_per_hole:r.bestPerHole
+      }));
+
+      const res = await client
+        .from('winter_league_standings')
+        .upsert(rows, { onConflict:'name' });
+
+      if (res.error) toast("Error: " + res.error.message);
+      else toast("Event removed from season ✓");
+    }
+  }
+
+  // ---------------------------
+  // Season: Reset Entire Table
+  // ---------------------------
+  async function clearSeason() {
+    if (!client) { toast("No client"); return; }
+    if (!window.confirm("⚠ This will delete ALL season standings. Continue?")) return;
+
+    const res = await client.from('winter_league_standings').delete().neq('name','');
+    if (res.error) toast("Error: " + res.error.message);
+    else {
+      setSeason({});
+      toast("Season cleared");
+    }
+  }
+// ----------------------------------------------------
+// Header
+// ----------------------------------------------------
+function Header({ eventName, statusMsg }) {
+  return (
+    <header className="hide-print rounded-2xl p-4 border border-squab-700 bg-squab-600 text-white shadow">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+            Wednesday Winter League — League & Eclectic
+          </h1>
+          <p className="text-xs text-white/90">Supabase: {statusMsg}</p>
+        </div>
+        <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">
+          {eventName || "Untitled Event"}
+        </span>
+      </div>
+    </header>
+  );
+}
+
+// ----------------------------------------------------
+// Event Navigation Bar (appears after loading a game)
+// ----------------------------------------------------
+function EventNav({ setView }) {
+  return (
+    <nav className="flex flex-wrap gap-2 mb-4">
+      <button className="chip" onClick={() => setView('event')}>Event</button>
+      <button className="chip" onClick={() => setView('ratings')}>Ratings</button>
+      <button className="chip" onClick={() => setView('holes')}>Hole Analysis</button>
+      <button className="chip" onClick={() => setView('standings')}>Standings</button>
+      <button className="chip" onClick={() => setView('eclectic')}>Eclectic</button>
+      <button className="chip" onClick={() => setView('home')}>Home</button>
+    </nav>
+  );
+}
+
+// ----------------------------------------------------
+// Home Menu
+// ----------------------------------------------------
+function Home({ setView, fileInputRef, importLocalCSV, computed, addEventToSeason, removeEventFromSeason, clearSeason }) {
+  const canAct = computed.length > 0;
+  const [open, setOpen] = useState(true);
+
+  return (
+    <section className="rounded-2xl p-3 md:p-4 panel-mint shadow-sm">
+      <button
+        className="w-full bg-white text-neutral-900 border border-squab-200 rounded-xl px-4 py-3 flex items-center justify-between"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="font-semibold">Menu</span>
+        <span className={`transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+
+      <div className={`overflow-hidden transition-all ${open ? 'max-h-[2000px]' : 'max-h-0'}`}>
+        <div className="mt-3 grid gap-2">
+          <button
+            className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+            onClick={() => setView('past')}
+          >
+            View Past Golf Events
+          </button>
+
+          <button
+            className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+            onClick={() => setView('ratings')}
+          >
+            View Player Ratings
+          </button>
+
+          <button
+            className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+            onClick={() => setView('holes')}
+          >
+            Player Hole Analysis
+          </button>
+
+          <button
+            className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+            onClick={() => setView('standings')}
+          >
+            Check Season Standings
+          </button>
+
+          <button
+            className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+            onClick={() => setView('eclectic')}
+          >
+            Check Eclectic Leaderboard
+          </button>
+
+          {/* Import CSV */}
+          <button
+            className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+          >
+            Import CSV
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={async e => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const text = await f.text();
+              importLocalCSV(text, f.name);
+              e.target.value = '';
+            }}
+          />
+
+          {/* Add Event to Season */}
+          <button
+            className={`w-full text-left rounded-xl border px-3 py-2 ${
+              canAct ? 'border-squab-200 bg-white' : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
+            }`}
+            onClick={addEventToSeason}
+            disabled={!canAct}
+          >
+            Add Event → Season
+          </button>
+
+          {/* Remove Event */}
+          <button
+            className={`w-full text-left rounded-xl border px-3 py-2 ${
+              canAct ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
+            }`}
+            onClick={removeEventFromSeason}
+            disabled={!canAct}
+          >
+            Remove Event ← Season
+          </button>
+
+          {/* Delete Season */}
+          <button
+            className="w-full text-left rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-red-700"
+            onClick={clearSeason}
+          >
+            Delete Entire Season
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ----------------------------------------------------
+// Past Events (Supabase)
+// ----------------------------------------------------
+function PastEvents({ sharedGroups, loadShared, setView }) {
+  return (
+    <section className="rounded-2xl p-3 md:p-4 bg-white border border-squab-200 shadow-sm">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-lg font-semibold text-squab-900">Past Wednesday Winter League Games</h2>
+        <button className="btn border border-squab-200" onClick={() => setView('home')}>Back</button>
+      </div>
+
+      {sharedGroups.length === 0 && (
+        <div className="text-sm text-neutral-600 p-2">No shared CSVs yet.</div>
+      )}
+
+      {sharedGroups.map(group => (
+        <div key={group.year} className="mb-3">
+          <div className="text-xs text-neutral-600 mb-1">{group.year}</div>
+          <select
+            className="w-full rounded-xl border border-squab-200 px-3 py-2 bg-white"
+            onChange={async e => {
+              const idx = e.target.value;
+              if (!idx) return;
+              const item = group.events[Number(idx)];
+              await loadShared(item);
+            }}
+          >
+            <option value="">Select an event…</option>
+            {group.events.map((item, i) => (
+              <option key={item.path} value={i}>{item.name}</option>
+            ))}
+          </select>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// ----------------------------------------------------
+// Event Screen
+// ----------------------------------------------------
+function EventScreen({ computed, setView }) {
+  return (
+    <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
+      <EventNav setView={setView} />
+
+      <h2 className="text-lg font-semibold text-squab-900 mb-3">Event Leaderboard</h2>
+
+      <div className="overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead className="sticky top-0 bg-white z-10">
+            <tr className="border-b border-squab-200 text-left">
+              <th>#</th>
+              <th>Name</th>
+              <th>Handicap</th>
+              <th>Stableford</th>
+              <th>Back9</th>
+              <th>Pts</th>
+              <th>New Hcap</th>
+            </tr>
+          </thead>
+
+          <tbody className="[&_tr:nth-child(even)]:bg-squab-50">
+            {computed.length === 0 && (
+              <tr>
+                <td colSpan="7" className="py-3 text-neutral-600">
+                  Load an event to see results.
+                </td>
+              </tr>
+            )}
+
+            {computed.map((r, i) => (
+              <tr key={i} className="border-b border-squab-200">
+                <td>{r.position}</td>
+                <td className="whitespace-nowrap">{r.name}</td>
+                <td>{Math.round(r.startExact)}</td>
+                <td>{r.points}</td>
+                <td>{r.back9}</td>
+                <td>{r.leaguePoints}</td>
+                <td>{r.nextPlaying}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ----------------------------------------------------
+// Player Ratings Screen
+// ----------------------------------------------------
+function Ratings({ computed, coursePars, setView }) {
+  const menPars = coursePars.men;
+  const womenPars = coursePars.women;
+
+  const ratingLabel = avg =>
+    avg >= 3 ? 'Excellent' :
+    avg >= 2.5 ? 'Good' :
+    avg >= 2 ? 'Solid' :
+    avg >= 1.5 ? 'Needs Work' :
+    'Struggle';
+
+  const badgeClass = avg =>
+    avg >= 3 ? 'bg-emerald-100 text-emerald-800' :
+    avg >= 2.5 ? 'bg-emerald-50 text-emerald-700' :
+    avg >= 2 ? 'bg-neutral-100 text-neutral-800' :
+    avg >= 1.5 ? 'bg-amber-100 text-amber-800' :
+    'bg-red-100 text-red-800';
+
+  const eventParAverages = (perHole, pars) => {
+    const sums = {3:{s:0,c:0}, 4:{s:0,c:0}, 5:{s:0,c:0}};
+    for (let i=0; i<18; i++) {
+      const pts = Number(perHole[i]) || 0;
+      const par = pars[i] || 4;
+      if (sums[par]) {
+        sums[par].s += pts;
+        sums[par].c++;
+      }
+    }
+    const avg = t => sums[t].c ? sums[t].s / sums[t].c : 0;
+    return {
+      p3: avg(3),
+      p4: avg(4),
+      p5: avg(5)
+    };
+  };
+
+  const ratings = useMemo(() => {
+    return computed.map(r => {
+      const pars = r.gender === 'F' ? womenPars : menPars;
+      const av = eventParAverages(r.perHole, pars);
+      return {
+        name: r.name,
+        p3: to1(av.p3),
+        p4: to1(av.p4),
+        p5: to1(av.p5),
+        total: to1(av.p3 + av.p4 + av.p5)
+      };
+    }).sort((a,b)=>b.total-a.total);
+  }, [computed, menPars, womenPars]);
+
+  return (
+    <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
+      <EventNav setView={setView} />
+
+      <h2 className="text-lg font-semibold text-squab-900 mb-3">Player Ratings</h2>
+
+      <div className="overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-squab-200 text-left">
+              <th>Name</th>
+              <th>Par-3 Avg</th>
+              <th>Rating</th>
+              <th>Par-4 Avg</th>
+              <th>Rating</th>
+              <th>Par-5 Avg</th>
+              <th>Rating</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {ratings.map(r => (
+              <tr key={r.name} className="border-b border-squab-200">
+                <td className="font-medium">{r.name}</td>
+
+                <td>{r.p3.toFixed(1)}</td>
+                <td>
+                  <span className={`px-2 py-0.5 rounded-lg text-xs ${badgeClass(r.p3)}`}>
+                    {ratingLabel(r.p3)}
+                  </span>
+                </td>
+
+                <td>{r.p4.toFixed(1)}</td>
+                <td>
+                  <span className={`px-2 py-0.5 rounded-lg text-xs ${badgeClass(r.p4)}`}>
+                    {ratingLabel(r.p4)}
+                  </span>
+                </td>
+
+                <td>{r.p5.toFixed(1)}</td>
+                <td>
+                  <span className={`px-2 py-0.5 rounded-lg text-xs ${badgeClass(r.p5)}`}>
+                    {ratingLabel(r.p5)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ----------------------------------------------------
+// Season Standings
+// ----------------------------------------------------
+function Standings({ season, setView }) {
+  const list = Object.values(season)
+    .filter(r => !isTeamLike(r.name))
+    .sort((a,b)=>(b.totalPoints-a.totalPoints)||a.name.localeCompare(b.name));
+
+  return (
+    <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
+      <EventNav setView={setView} />
+
+      <h2 className="text-lg font-semibold text-squab-900 mb-3">Season Standings</h2>
+
+      <div className="overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-squab-200 text-left">
+              <th>Rank</th>
+              <th>Name</th>
+              <th>Events</th>
+              <th>Total</th>
+              <th>Best Event</th>
+              <th>Best Hole</th>
+              <th>Eclectic</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {list.map((r,i)=>(
+              <tr key={r.name} className="border-b border-squab-200">
+                <td>{i+1}</td>
+                <td>{r.name}</td>
+                <td>{r.events}</td>
+                <td>{r.totalPoints}</td>
+                <td>{r.bestEventPoints}</td>
+                <td>{r.bestHolePoints}</td>
+                <td>{r.eclecticTotal}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ----------------------------------------------------
+// Eclectic Leaderboard
+// ----------------------------------------------------
+function Eclectic({ season, setView }) {
+  const list = Object.values(season)
+    .filter(r => !isTeamLike(r.name))
+    .sort((a,b)=>((b.eclecticTotal||0)-(a.eclecticTotal||0)));
+
+  return (
+    <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
+      <EventNav setView={setView} />
+
+      <h2 className="text-lg font-semibold text-squab-900 mb-3">Eclectic Leaderboard</h2>
+
+      <div className="overflow-auto">
+        <table className="min-w-full text-xs md:text-sm">
+          <thead>
+            <tr className="border-b border-squab-200 text-left">
+              <th>Rank</th>
+              <th>Name</th>
+              <th>Eclectic Total</th>
+              {Array.from({length:18},(_,i)=>(<th key={i}>H{i+1}</th>))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {list.map((r,i)=>(
+              <tr key={r.name} className="border-b border-squab-200">
+                <td>{i+1}</td>
+                <td>{r.name}</td>
+                <td>{r.eclecticTotal}</td>
+                {(r.bestPerHole||Array(18).fill(0)).map((v,ix)=>(
+                  <td key={ix}>{v}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+// ----------------------------------------------------
+// Player Hole Analysis
+// ----------------------------------------------------
+function HoleAnalysis({
+  computed,
+  selectedPlayer,
+  setSelectedPlayer,
+  coursePars,
+  courseYards,
+  strokeIndex,
+  setView
+}) {
+  if (!computed.length) {
+    return (
+      <section className="rounded-2xl p-4 bg-white border border-squab-200 shadow-sm">
+        <EventNav setView={setView} />
+        <p className="text-neutral-600">Load an event to see hole analysis.</p>
+      </section>
+    );
+  }
+
+  // ---------------------------
+  // Player selection
+  // ---------------------------
+  const playerNames = computed.map((p) => p.name);
+  const player = computed.find((p) => p.name === selectedPlayer) || computed[0];
+
+  const perHole = player.perHole || Array(18).fill(0);
+  const pars = coursePars[player.gender === "F" ? "women" : "men"];
+  const yards = courseYards[player.gender === "F" ? "women" : "men"];
+
+  // ---------------------------
+  // Field averages
+  // ---------------------------
+  const fieldAvg = Array(18).fill(0);
+  for (let h = 0; h < 18; h++) {
+    const vals = computed.map((p) => Number(p.perHole[h]) || 0);
+    fieldAvg[h] = vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  // ---------------------------
+  // Helper: hole type
+  // ---------------------------
+  const holeType = (h) => {
+    const par = pars[h];
+    const yd = yards[h];
+    if (par === 3) return "Par 3";
+    if (par === 4) return yd >= 400 ? "Long Par 4" : "Par 4";
+    if (par === 5) return yd >= 520 ? "Long Par 5" : "Par 5";
+    return "Unknown";
+  };
+
+  // ---------------------------
+  // Summary stats
+  // ---------------------------
+  const gains = perHole.map((p, i) => p - fieldAvg[i]);
+  const totalGain = gains.reduce((a, b) => a + b, 0);
+
+  const bestHole = gains
+    .map((g, i) => ({ hole: i + 1, g }))
+    .sort((a, b) => b.g - a.g)[0];
+
+  const worstHole = gains
+    .map((g, i) => ({ hole: i + 1, g }))
+    .sort((a, b) => a.g - b.g)[0];
+
+  // Par summaries
+  const par3 = [];
+  const par4 = [];
+  const par5 = [];
+
+  for (let i = 0; i < 18; i++) {
+    if (pars[i] === 3) par3.push(perHole[i]);
+    if (pars[i] === 4) par4.push(perHole[i]);
+    if (pars[i] === 5) par5.push(perHole[i]);
+  }
+
+  const avgP3 = par3.reduce((a, b) => a + b, 0) / par3.length;
+  const avgP4 = par4.reduce((a, b) => a + b, 0) / par4.length;
+  const avgP5 = par5.reduce((a, b) => a + b, 0) / par5.length;
+
+  // ---------------------------
+  // UI
+  // ---------------------------
+  return (
+    <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
+      <EventNav setView={setView} />
+
+      <h2 className="text-lg font-semibold text-squab-900 mb-3">
+        Player Hole Analysis
+      </h2>
+
+      {/* Player selector */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium mb-1">Select Player</label>
+        <select
+          className="w-full max-w-xs rounded-xl border border-squab-200 px-3 py-2 bg-white"
+          value={selectedPlayer}
+          onChange={(e) => setSelectedPlayer(e.target.value)}
+        >
+          {playerNames.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Summary */}
+      <div className="grid md:grid-cols-3 gap-4 mb-5">
+        <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
+          <div className="text-xs text-neutral-600">Total Gain vs Field</div>
+          <div className="text-xl font-bold">{to1(totalGain)}</div>
+        </div>
+
+        <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
+          <div className="text-xs text-neutral-600">Best Hole</div>
+          <div className="text-xl font-bold">
+            Hole {bestHole.hole} ({to1(bestHole.g)} pts vs field)
           </div>
-        );
-      }
+        </div>
 
-      ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+        <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
+          <div className="text-xs text-neutral-600">Worst Hole</div>
+          <div className="text-xl font-bold">
+            Hole {worstHole.hole} ({to1(worstHole.g)} pts vs field)
+          </div>
+        </div>
+      </div>
+
+      {/* Par averages */}
+      <div className="grid md:grid-cols-3 gap-4 mb-6">
+        <div className="p-3 bg-white border border-squab-200 rounded-xl">
+          <div className="text-xs text-neutral-600">Avg Par-3 Score</div>
+          <div className="text-xl font-semibold">{to1(avgP3)}</div>
+        </div>
+        <div className="p-3 bg-white border border-squab-200 rounded-xl">
+          <div className="text-xs text-neutral-600">Avg Par-4 Score</div>
+          <div className="text-xl font-semibold">{to1(avgP4)}</div>
+        </div>
+        <div className="p-3 bg-white border border-squab-200 rounded-xl">
+          <div className="text-xs text-neutral-600">Avg Par-5 Score</div>
+          <div className="text-xl font-semibold">{to1(avgP5)}</div>
+        </div>
+      </div>
+
+      {/* Hole table */}
+      <div className="overflow-auto">
+        <table className="min-w-full text-xs md:text-sm">
+          <thead>
+            <tr className="border-b border-squab-200 bg-squab-50 text-left">
+              <th>Hole</th>
+              <th>Par</th>
+              <th>Yards</th>
+              <th>SI</th>
+              <th>Pts</th>
+              <th>Field Avg</th>
+              <th>Gain</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {perHole.map((pts, i) => (
+              <tr key={i} className="border-b">
+                <td>{i + 1}</td>
+                <td>{pars[i]}</td>
+                <td>{yards[i]}</td>
+                <td>{strokeIndex[i]}</td>
+                <td className="font-semibold">{pts}</td>
+                <td>{to1(fieldAvg[i])}</td>
+                <td
+                  className={
+                    gains[i] >= 0
+                      ? "text-emerald-600 font-semibold"
+                      : "text-red-600 font-semibold"
+                  }
+                >
+                  {to1(gains[i])}
+                </td>
+                <td>{holeType(i)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+// ----------------------------------------------------
+// Main App return
+// ----------------------------------------------------
+  // stroke index inside App scope
+  const strokeIndex = STROKE_INDEX;
+
+  return (
+    <div className="min-h-screen p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto space-y-4">
+
+        {/* Header */}
+        <Header eventName={eventName} statusMsg={statusMsg} />
+
+        {/* Route switching */}
+        {view === 'home' && (
+          <Home
+            setView={setView}
+            fileInputRef={fileInputRef}
+            importLocalCSV={importLocalCSV}
+            computed={computed}
+            addEventToSeason={addEventToSeason}
+            removeEventFromSeason={removeEventFromSeason}
+            clearSeason={clearSeason}
+          />
+        )}
+
+        {view === 'past' && (
+          <PastEvents
+            sharedGroups={sharedGroups}
+            loadShared={loadShared}
+            setView={setView}
+          />
+        )}
+
+        {view === 'event' && (
+          <EventScreen
+            computed={computed}
+            setView={setView}
+          />
+        )}
+
+        {view === 'ratings' && (
+          <Ratings
+            computed={computed}
+            coursePars={coursePars}
+            setView={setView}
+          />
+        )}
+
+        {view === 'holes' && (
+          <HoleAnalysis
+            computed={computed}
+            selectedPlayer={selectedPlayer}
+            setSelectedPlayer={setSelectedPlayer}
+            coursePars={coursePars}
+            courseYards={courseYards}
+            strokeIndex={strokeIndex}
+            setView={setView}
+          />
+        )}
+
+        {view === 'standings' && (
+          <Standings
+            season={season}
+            setView={setView}
+          />
+        )}
+
+        {view === 'eclectic' && (
+          <Eclectic
+            season={season}
+            setView={setView}
+          />
+        )}
+      </div>
+    </div>
+  );
+} // end of App()
+
+// ----------------------------------------------------
+// Mount React App
+// ----------------------------------------------------
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
     </script>
   </body>
 </html>
