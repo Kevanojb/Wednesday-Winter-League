@@ -61,11 +61,34 @@
       // ---------- utilities ----------
       const POINTS_TABLE = [20,17,15,13,11,9,8,7,6,5,4,3,2,1];
       const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
-      const csvEscape=s=>{ if(s==null) return ""; const str=String(s); return /[",
-]/.test(str) ? '"'+str.replace(/"/g,'""')+'"' : str; };
-      const downloadCSV=(filename, rows)=>{ const csv=rows.map(r=>r.map(csvEscape).join(",")).join("\n"); const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); };
+      // FIXED: regex must be on one line and include \n explicitly
+      const csvEscape = s => {
+        if (s == null) return "";
+        const str = String(s);
+        return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+      };
+      const downloadCSV=(filename, rows)=>{
+        const csv=rows.map(r=>r.map(csvEscape).join(",")).join("\n");
+        const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+        const a=document.createElement("a");
+        a.href=URL.createObjectURL(blob);
+        a.download=filename;
+        a.click();
+      };
       const to1=x=>Math.round((Number(x)||0)*10)/10;
-      function toast(msg){ try{ const t=document.createElement('div'); t.className='fixed bottom-4 right-4 left-4 md:left-auto md:right-4 px-3 py-2 rounded-lg bg-black text-white text-sm shadow z-50 text-center'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>{ t.style.opacity='0'; t.style.transition='opacity .2s'; setTimeout(()=>t.remove(),220); }, 1400);}catch{}}
+      function toast(msg){
+        try{
+          const t=document.createElement('div');
+          t.className='fixed bottom-4 right-4 left-4 md:left-auto md:right-4 px-3 py-2 rounded-lg bg-black text-white text-sm shadow z-50 text-center';
+          t.textContent=msg;
+          document.body.appendChild(t);
+          setTimeout(()=>{
+            t.style.opacity='0';
+            t.style.transition='opacity .2s';
+            setTimeout(()=>t.remove(),220);
+          }, 1400);
+        }catch{}
+      }
 
       // Default pars (fallback if CSV doesn’t contain Par row)
       const COURSE_DEFAULT_MEN   = [4,4,3,4,5,4,3,4,4, 4,5,4,3,4,4,5,3,4];
@@ -435,8 +458,17 @@
 
         function groupByYear(files){
           const groups={};
-          for(const f of files){ const m=f.name.match(/(20\d{2})/); const year=m?m[1]:'Unknown'; (groups[year]=groups[year]||[]).push(f); }
-          return Object.keys(groups).sort((a,b)=>b.localeCompare(a)).map(y=>({year:y, events:groups[y].sort((a,b)=>a.name.localeCompare(b.name))}));
+          for(const f of files){
+            const m=f.name.match(/(20\d{2})/);
+            const year=m?m[1]:'Unknown';
+            (groups[year]=groups[year]||[]).push(f);
+          }
+          return Object.keys(groups)
+            .sort((a,b)=>b.localeCompare(a))
+            .map(y=>({
+              year:y,
+              events:groups[y].sort((a,b)=>a.name.localeCompare(b.name))
+            }));
         }
 
         async function loadShared(item){
@@ -457,24 +489,50 @@
 
         // computed event outcomes
         const computed = useMemo(()=>{
-          const rows=players.map((p,i)=>({idx:i,name:p.name,gender:p.gender,startExact:p.handicap,points:p.points,back9:p.back9,perHole:p.perHole}));
+          const rows=players.map((p,i)=>({
+            idx:i,
+            name:p.name,
+            gender:p.gender,
+            startExact:p.handicap,
+            points:p.points,
+            back9:p.back9,
+            perHole:p.perHole
+          }));
           const base=[...rows].sort((a,b)=>(b.points-a.points)||(compareByCountback(a,b)));
           if(!base.length) return [];
           const groups=[]; const used=new Set();
-          for(const r of base){ if(used.has(r.idx)) continue; const grpIdxs=base.filter(x=>x.points===r.points).map(x=>x.idx); grpIdxs.forEach(id=>used.add(id)); groups.push(grpIdxs); }
+          for(const r of base){
+            if(used.has(r.idx)) continue;
+            const grpIdxs=base.filter(x=>x.points===r.points).map(x=>x.idx);
+            grpIdxs.forEach(id=>used.add(id));
+            groups.push(grpIdxs);
+          }
           const topGroup=groups[0].map(i=>rows.find(r=>r.idx===i));
           let best=[topGroup[0]];
-          for(let k=1;k<topGroup.length;k++){ const cmp=compareByCountback(topGroup[k],best[0]); if(cmp>0) best=[topGroup[k]]; else if(cmp===0) best.push(topGroup[k]); }
+          for(let k=1;k<topGroup.length;k++){
+            const cmp=compareByCountback(topGroup[k],best[0]);
+            if(cmp>0) best=[topGroup[k]];
+            else if(cmp===0) best.push(topGroup[k]);
+          }
           const winnerIdxSet=new Set(best.map(r=>r.idx));
 
           let pos=1; const out=[];
           for(let gIdx=0; gIdx<groups.length; gIdx++){
-            const g=groups[gIdx]; const start=pos; const ptsValue=POINTS_TABLE[start-1]||0;
+            const g=groups[gIdx];
+            const start=pos;
+            const ptsValue=POINTS_TABLE[start-1]||0;
             for(const i of g){
               const r=rows.find(x=>x.idx===i);
               const isWinner=winnerIdxSet.has(i) && (gIdx===0);
               const res=computeNewExactHandicap(r.startExact,r.gender,r.points,r.back9,isWinner);
-              out.push({...r, position:start, leaguePoints:ptsValue, isWinner, nextExact:res.nextExact, nextPlaying:res.nextPlaying});
+              out.push({
+                ...r,
+                position:start,
+                leaguePoints:ptsValue,
+                isWinner,
+                nextExact:res.nextExact,
+                nextPlaying:res.nextPlaying
+              });
             }
             pos+=g.length;
           }
@@ -482,15 +540,31 @@
         },[players]);
 
         async function fetchSeasonWith(c){
-          const r = await c.from('season_standings').select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
-          if(r.error){ setStatusMsg('Error: '+r.error.message); return; }
-          const data=r.data||[]; const map={};
+          const r = await c
+            .from('season_standings')
+            .select('name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole');
+          if(r.error){
+            setStatusMsg('Error: '+r.error.message);
+            return;
+          }
+          const data=r.data||[];
+          const map={};
           for(const rec of data){
             if(isTeamLike(rec.name)) continue;
             let bph=[];
             if(Array.isArray(rec.best_per_hole)) bph=rec.best_per_hole;
-            else if(typeof rec.best_per_hole==='string'){ try{ bph=JSON.parse(rec.best_per_hole||'[]')||[]; }catch(e){ bph=[]; } }
-            map[rec.name]={ name:rec.name, totalPoints:rec.total_points||0, events:rec.events||0, bestEventPoints:rec.best_event_points??0, bestHolePoints:rec.best_hole_points??0, eclecticTotal:rec.eclectic_total??0, bestPerHole:(bph||[]).map(n=>Number(n)||0) };
+            else if(typeof rec.best_per_hole==='string'){
+              try{ bph=JSON.parse(rec.best_per_hole||'[]')||[]; }catch(e){ bph=[]; }
+            }
+            map[rec.name]={
+              name:rec.name,
+              totalPoints:rec.total_points||0,
+              events:rec.events||0,
+              bestEventPoints:rec.best_event_points??0,
+              bestHolePoints:rec.best_hole_points??0,
+              eclecticTotal:rec.eclectic_total??0,
+              bestPerHole:(bph||[]).map(n=>Number(n)||0)
+            };
           }
           setSeason(map);
         }
@@ -500,17 +574,41 @@
           const next={ ...season };
           for(const r of computed){
             if(isTeamLike(r.name)) continue;
-            const prev=next[r.name]||{name:r.name,totalPoints:0,events:0,bestPerHole:Array(18).fill(0),eclecticTotal:0,bestEventPoints:0,bestHolePoints:0};
-            const eventPerHole=(r.perHole||[]).map(v=>Math.max(0,Math.min(6,Number(v)||0)));
-            const bestPerHole=Array.from({length:18},(_,idx)=>Math.max(prev.bestPerHole[idx]||0,eventPerHole[idx]||0));
+            const prev=next[r.name]||{
+              name:r.name,
+              totalPoints:0,
+              events:0,
+              bestPerHole:Array(18).fill(0),
+              eclecticTotal:0,
+              bestEventPoints:0,
+              bestHolePoints:0
+            };
+            const eventPerHole=(r.perHole||[])
+              .map(v=>Math.max(0,Math.min(6,Number(v)||0)));
+            const bestPerHole=Array.from(
+              {length:18},
+              (_,idx)=>Math.max(prev.bestPerHole[idx]||0,eventPerHole[idx]||0)
+            );
             const eclecticTotal=bestPerHole.reduce((s,v)=>s+(Number(v)||0),0);
             const nextBestEvent=Math.max(prev.bestEventPoints||0,r.points||0);
-            const nextBestHole=Math.max(prev.bestHolePoints||0,Math.max.apply(null,[0].concat(eventPerHole)));
-            next[r.name]={ name:r.name, totalPoints:(prev.totalPoints||0)+(r.leaguePoints||0), events:(prev.events||0)+1, bestEventPoints:nextBestEvent, bestHolePoints:nextBestHole, eclecticTotal, bestPerHole };
+            const nextBestHole=Math.max(
+              prev.bestHolePoints||0,
+              Math.max.apply(null,[0].concat(eventPerHole))
+            );
+            next[r.name]={
+              name:r.name,
+              totalPoints:(prev.totalPoints||0)+(r.leaguePoints||0),
+              events:(prev.events||0)+1,
+              bestEventPoints:nextBestEvent,
+              bestHolePoints:nextBestHole,
+              eclecticTotal,
+              bestPerHole
+            };
           }
           setSeason(next);
           if(client){
-            const rows=[]; const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
+            const rows=[];
+            const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
             for(const r of vals){
               rows.push({
                 name:r.name,
@@ -519,11 +617,16 @@
                 best_event_points:(r.bestEventPoints??0)|0,
                 best_hole_points:(r.bestHolePoints??0)|0,
                 eclectic_total:(r.eclecticTotal??0)|0,
-                best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
+                best_per_hole:Array.isArray(r.bestPerHole)
+                  ? r.bestPerHole.map(n=>Number(n)||0)
+                  : Array(18).fill(0)
               });
             }
-            const u = await client.from('season_standings').upsert(rows,{onConflict:'name'});
-            if(u.error){ toast('Error: '+u.error.message); } else { toast('Event added to season ✓'); }
+            const u = await client
+              .from('season_standings')
+              .upsert(rows,{onConflict:'name'});
+            if(u.error){ toast('Error: '+u.error.message); }
+            else { toast('Event added to season ✓'); }
           }
         }
 
@@ -531,7 +634,10 @@
         async function clearSeason(){
           if(!client){ toast('No Supabase client'); return; }
           if(!window.confirm('This will delete ALL season standings. Are you sure?')) return;
-          const { error } = await client.from('season_standings').delete().neq('name','');
+          const { error } = await client
+            .from('season_standings')
+            .delete()
+            .neq('name','');
           if(error){ toast('Error: '+error.message); return; }
           setSeason({});
           toast('Season cleared');
@@ -568,7 +674,8 @@
           setSeason(next);
 
           if(client){
-            const removedNames = Object.keys(oldSeason).filter(name => !next[name]);
+            const removedNames = Object.keys(oldSeason)
+              .filter(name => !next[name]);
             if(removedNames.length){
               const { error: delErr } = await client
                 .from('season_standings')
@@ -577,7 +684,8 @@
               if(delErr){ toast('Error: '+delErr.message); return; }
             }
 
-            const rows=[]; const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
+            const rows=[];
+            const vals=Object.values(next).filter(r=>!isTeamLike(r.name));
             for(const r of vals){
               rows.push({
                 name:r.name,
@@ -586,19 +694,37 @@
                 best_event_points:(r.bestEventPoints??0)|0,
                 best_hole_points:(r.bestHolePoints??0)|0,
                 eclectic_total:(r.eclecticTotal??0)|0,
-                best_per_hole:Array.isArray(r.bestPerHole)?r.bestPerHole.map(n=>Number(n)||0):Array(18).fill(0)
+                best_per_hole:Array.isArray(r.bestPerHole)
+                  ? r.bestPerHole.map(n=>Number(n)||0)
+                  : Array(18).fill(0)
               });
             }
-            const { error: upErr } = await client.from('season_standings').upsert(rows,{onConflict:'name'});
-            if(upErr){ toast('Error: '+upErr.message); } else { toast('Event removed from season ✓'); }
+            const { error: upErr } = await client
+              .from('season_standings')
+              .upsert(rows,{onConflict:'name'});
+            if(upErr){ toast('Error: '+upErr.message); }
+            else { toast('Event removed from season ✓'); }
           }
         }
 
         function exportEventCSV(){
           if(!computed.length){ toast('Load an event first'); return; }
           const rows=[["Name","Gender","Exact","Stableford","Back9","Pos","Pts","NextExact","NextPlay"]];
-          computed.forEach(r=>rows.push([r.name,r.gender,Math.round(r.startExact),r.points,r.back9,r.position,r.leaguePoints,r.nextExact.toFixed(1),r.nextPlaying]));
-          downloadCSV(`WednesdayWinterLeague_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,rows);
+          computed.forEach(r=>rows.push([
+            r.name,
+            r.gender,
+            Math.round(r.startExact),
+            r.points,
+            r.back9,
+            r.position,
+            r.leaguePoints,
+            r.nextExact.toFixed(1),
+            r.nextPlaying
+          ]));
+          downloadCSV(
+            `WednesdayWinterLeague_${(eventName||'Event').replace(/[^a-z0-9]+/gi,'_')}.csv`,
+            rows
+          );
         }
 
         // ---------- UI ----------
@@ -607,10 +733,14 @@
             <header className="hide-print rounded-2xl p-4 border border-squab-700 bg-squab-600 text-white">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h1 className="text-xl md:text-2xl font-bold tracking-tight">Wednesday Winter League — League & Eclectic</h1>
+                  <h1 className="text-xl md:text-2xl font-bold tracking-tight">
+                    Wednesday Winter League — League & Eclectic
+                  </h1>
                   <p className="text-xs/5 text-white/90">Supabase: {statusMsg}</p>
                 </div>
-                <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">{eventName||'Untitled Event'}</span>
+                <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">
+                  {eventName||'Untitled Event'}
+                </span>
               </div>
             </header>
           );
@@ -634,15 +764,37 @@
 
               <div className={`overflow-hidden transition-all ${open?'max-h-[2000px]':'max-h-0'}`}>
                 <div className="mt-3 grid gap-2">
-                  <button className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2" onClick={()=>setView('past')}>View Past Golf Events</button>
-                  <button className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2" onClick={()=>setView('ratings')}>View Player Ratings</button>
-                  <button className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2" onClick={()=>setView('standings')}>Check Season Standings</button>
-                  <button className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2" onClick={()=>setView('eclectic')}>Check Eclectic Leaderboard</button>
+                  <button
+                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+                    onClick={()=>setView('past')}
+                  >
+                    View Past Golf Events
+                  </button>
+                  <button
+                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+                    onClick={()=>setView('ratings')}
+                  >
+                    View Player Ratings
+                  </button>
+                  <button
+                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+                    onClick={()=>setView('standings')}
+                  >
+                    Check Season Standings
+                  </button>
+                  <button
+                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+                    onClick={()=>setView('eclectic')}
+                  >
+                    Check Eclectic Leaderboard
+                  </button>
 
                   <button
                     className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
                     onClick={()=>{ fileInputRef.current && fileInputRef.current.click(); }}
-                  >Import CSV</button>
+                  >
+                    Import CSV
+                  </button>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -662,32 +814,55 @@
                         });
                         setView('event');
                         e.target.value='';
-                      }catch(err){ toast('Bad CSV'); console.error(err); }
+                      }catch(err){
+                        toast('Bad CSV');
+                        console.error(err);
+                      }
                     }}
                   />
 
                   <button
-                    className={`w-full text-left rounded-xl border px-3 py-2 ${canAct?'border-squab-200 bg-white':'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'}`}
+                    className={`w-full text-left rounded-xl border px-3 py-2 ${
+                      canAct
+                        ? 'border-squab-200 bg-white'
+                        : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
+                    }`}
                     onClick={addEventToSeason}
                     disabled={!canAct}
-                  >Add Event → Season</button>
+                  >
+                    Add Event → Season
+                  </button>
 
                   <button
-                    className={`w-full text-left rounded-xl border px-3 py-2 ${canAct?'border-amber-300 bg-amber-50 text-amber-800':'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'}`}
+                    className={`w-full text-left rounded-xl border px-3 py-2 ${
+                      canAct
+                        ? 'border-amber-300 bg-amber-50 text-amber-800'
+                        : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
+                    }`}
                     onClick={removeEventFromSeason}
                     disabled={!canAct}
-                  >Remove Event ← Season</button>
+                  >
+                    Remove Event ← Season
+                  </button>
 
                   <button
-                    className={`w-full text-left rounded-xl border px-3 py-2 ${canAct?'border-squab-200 bg-white':'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'}`}
+                    className={`w-full text-left rounded-xl border px-3 py-2 ${
+                      canAct
+                        ? 'border-squab-200 bg-white'
+                        : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
+                    }`}
                     onClick={exportEventCSV}
                     disabled={!canAct}
-                  >Download CSV</button>
+                  >
+                    Download CSV
+                  </button>
 
                   <button
                     className="w-full text-left rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-red-700"
                     onClick={clearSeason}
-                  >Delete Entire Season</button>
+                  >
+                    Delete Entire Season
+                  </button>
                 </div>
               </div>
             </section>
@@ -698,16 +873,32 @@
           return (
             <section className="rounded-2xl p-3 md:p-4 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-lg font-semibold text-squab-900">Past Wednesday Winter League Games</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>Back</button>
+                <h2 className="text-lg font-semibold text-squab-900">
+                  Past Wednesday Winter League Games
+                </h2>
+                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
+                  Back
+                </button>
               </div>
-              {sharedGroups.length===0 && <div className="text-sm text-neutral-600 p-2">No shared CSVs yet.</div>}
+              {sharedGroups.length===0 && (
+                <div className="text-sm text-neutral-600 p-2">No shared CSVs yet.</div>
+              )}
               {sharedGroups.map(group=> (
                 <div key={group.year} className="mb-3">
                   <div className="text-xs text-neutral-600 mb-1">{group.year}</div>
-                  <select className="w-full rounded-xl border border-squab-200 px-3 py-2 bg-white" onChange={async e=>{ const idx=e.target.value; if(idx==='') return; const item=group.events[Number(idx)]; await loadShared(item); }} >
+                  <select
+                    className="w-full rounded-xl border border-squab-200 px-3 py-2 bg-white"
+                    onChange={async e=>{
+                      const idx=e.target.value;
+                      if(idx==='') return;
+                      const item=group.events[Number(idx)];
+                      await loadShared(item);
+                    }}
+                  >
                     <option value="">Select an event…</option>
-                    {group.events.map((item,i)=> (<option key={item.path} value={i}>{item.name}</option>))}
+                    {group.events.map((item,i)=> (
+                      <option key={item.path} value={i}>{item.name}</option>
+                    ))}
                   </select>
                 </div>
               ))}
@@ -719,19 +910,35 @@
           return (
             <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">Event — {eventName || 'Selected Event'}</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('past')}>Back</button>
+                <h2 className="text-lg font-semibold text-squab-900">
+                  Event — {eventName || 'Selected Event'}
+                </h2>
+                <button className="btn border border-squab-200" onClick={()=>setView('past')}>
+                  Back
+                </button>
               </div>
 
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-white z-10">
                     <tr className="border-b border-squab-200 text-left">
-                      <th>#</th><th>Name</th><th>Handicap</th><th>Stableford</th><th>Back9</th><th>Pts</th><th>New Handicap</th>
+                      <th>#</th>
+                      <th>Name</th>
+                      <th>Handicap</th>
+                      <th>Stableford</th>
+                      <th>Back9</th>
+                      <th>Pts</th>
+                      <th>New Handicap</th>
                     </tr>
                   </thead>
                   <tbody className="[&_tr:nth-child(even)]:bg-squab-50">
-                    {computed.length===0 && (<tr><td colSpan="7" className="py-3 text-neutral-600">Pick an event to see players.</td></tr>)}
+                    {computed.length===0 && (
+                      <tr>
+                        <td colSpan="7" className="py-3 text-neutral-600">
+                          Pick an event to see players.
+                        </td>
+                      </tr>
+                    )}
                     {computed.map((r,i)=>(
                       <tr key={i} className="border-b border-squab-200">
                         <td>{r.position}</td>
@@ -746,7 +953,9 @@
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-neutral-600 mt-2">Ties share the highest slot. Winner by countback: Back 9 → Last 6 → Last 3 → 18th → 17th … 1st.</p>
+              <p className="text-xs text-neutral-600 mt-2">
+                Ties share the highest slot. Winner by countback: Back 9 → Last 6 → Last 3 → 18th → 17th … 1st.
+              </p>
             </section>
           );
         }
@@ -773,7 +982,10 @@
             for(let i=0;i<Math.min(18,perHole.length,pars.length);i++){
               const pts=Number(perHole[i])||0;
               const par=Number(pars[i])||4;
-              if(sums[par]){ sums[par].s+=pts; sums[par].c++; }
+              if(sums[par]){
+                sums[par].s+=pts;
+                sums[par].c++;
+              }
             }
             const avg=t=>sums[t].c?(sums[t].s/sums[t].c):0;
             return {p3:avg(3),p4:avg(4),p5:avg(5)};
@@ -798,8 +1010,12 @@
           return (
             <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-squab-900">Player Ratings — {eventName||'This Event'}</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>Back</button>
+                <h2 className="text-lg font-semibold text-squab-900">
+                  Player Ratings — {eventName||'This Event'}
+                </h2>
+                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
+                  Back
+                </button>
               </div>
 
               <div className="overflow-auto">
@@ -807,14 +1023,21 @@
                   <thead>
                     <tr className="border-b border-squab-200 text-left">
                       <th>Name</th>
-                      <th>Par-3 avg</th><th>Par-3 rating</th>
-                      <th>Par-4 avg</th><th>Par-4 rating</th>
-                      <th>Par-5 avg</th><th>Par-5 rating</th>
+                      <th>Par-3 avg</th>
+                      <th>Par-3 rating</th>
+                      <th>Par-4 avg</th>
+                      <th>Par-4 rating</th>
+                      <th>Par-5 avg</th>
+                      <th>Par-5 rating</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ratings.length===0 && (
-                      <tr><td colSpan="7" className="py-3 text-neutral-600">Import a Squabbit CSV or pick one from Past Events to see ratings.</td></tr>
+                      <tr>
+                        <td colSpan="7" className="py-3 text-neutral-600">
+                          Import a Squabbit CSV or pick one from Past Events to see ratings.
+                        </td>
+                      </tr>
                     )}
                     {ratings.map(r=> (
                       <tr key={r.name} className="border-b border-squab-200">
@@ -850,22 +1073,38 @@
         }
 
         function Standings(){
-          const list = Object.values(season).filter(r=>!isTeamLike(r.name)).sort((a,b)=>(b.totalPoints-a.totalPoints)||a.name.localeCompare(b.name));
+          const list = Object.values(season)
+            .filter(r=>!isTeamLike(r.name))
+            .sort((a,b)=>(b.totalPoints-a.totalPoints)||a.name.localeCompare(b.name));
           return (
             <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-semibold text-squab-900">Season Standings</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>Back</button>
+                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
+                  Back
+                </button>
               </div>
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="border-b border-squab-200 text-left">
-                      <th>Rank</th><th>Name</th><th>Events</th><th>Total</th><th>Best Event</th><th>Best Hole</th><th>Eclectic</th>
+                      <th>Rank</th>
+                      <th>Name</th>
+                      <th>Events</th>
+                      <th>Total</th>
+                      <th>Best Event</th>
+                      <th>Best Hole</th>
+                      <th>Eclectic</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {list.length===0 && <tr><td colSpan="7" className="py-3 text-neutral-600">No season data found.</td></tr>}
+                    {list.length===0 && (
+                      <tr>
+                        <td colSpan="7" className="py-3 text-neutral-600">
+                          No season data found.
+                        </td>
+                      </tr>
+                    )}
                     {list.map((r,i)=>(
                       <tr key={r.name} className="border-b border-squab-200">
                         <td>{i+1}</td>
@@ -885,12 +1124,16 @@
         }
 
         function Eclectic(){
-          const list = Object.values(season).filter(r=>!isTeamLike(r.name)).sort((a,b)=>((b.eclecticTotal??0)-(a.eclecticTotal??0))||a.name.localeCompare(b.name));
+          const list = Object.values(season)
+            .filter(r=>!isTeamLike(r.name))
+            .sort((a,b)=>((b.eclecticTotal??0)-(a.eclecticTotal??0))||a.name.localeCompare(b.name));
           return (
             <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-semibold text-squab-900">Eclectic Leaderboard</h2>
-                <button className="btn border border-squab-200" onClick={()=>setView('home')}>Back</button>
+                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
+                  Back
+                </button>
               </div>
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
@@ -903,13 +1146,20 @@
                     </tr>
                   </thead>
                   <tbody>
-                    {list.length===0 && <tr><td colSpan="21" className="py-3 text-neutral-600">No eclectic yet.</td></tr>}
+                    {list.length===0 && (
+                      <tr>
+                        <td colSpan="21" className="py-3 text-neutral-600">
+                          No eclectic yet.
+                        </td>
+                      </tr>
+                    )}
                     {list.map((r,i)=>(
                       <tr key={r.name} className="border-b border-squab-200">
                         <td>{i+1}</td>
                         <td>{r.name}</td>
                         <td>{r.eclecticTotal??0}</td>
-                        {(Array.isArray(r.bestPerHole)?r.bestPerHole:Array(18).fill(0)).map((v,ix)=>(<td key={ix}>{v}</td>))}
+                        {(Array.isArray(r.bestPerHole)?r.bestPerHole:Array(18).fill(0))
+                          .map((v,ix)=>(<td key={ix}>{v}</td>))}
                       </tr>
                     ))}
                   </tbody>
