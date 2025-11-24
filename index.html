@@ -61,7 +61,6 @@
       // ---------- utilities ----------
       const POINTS_TABLE = [20,17,15,13,11,9,8,7,6,5,4,3,2,1];
       const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
-      // FIXED: regex must be on one line and include \n explicitly
       const csvEscape = s => {
         if (s == null) return "";
         const str = String(s);
@@ -93,6 +92,20 @@
       // Default pars (fallback if CSV doesn’t contain Par row)
       const COURSE_DEFAULT_MEN   = [4,4,3,4,5,4,3,4,4, 4,5,4,3,4,4,5,3,4];
       const COURSE_DEFAULT_WOMEN = [4,4,3,4,5,4,3,4,4, 4,4,5,3,4,4,5,3,4];
+
+      // Chart Hills yardages & stroke index (static for this league)
+      const COURSE_YARDS_MEN = [
+        562,445,165,391,474,289,206,399,350,
+        405,165,487,412,350,409,482,126,413
+      ];
+      const COURSE_YARDS_WOMEN = [
+        498,364,111,329,420,230,147,358,276,
+        391,127,412,347,305,363,402,78,345
+      ];
+      const COURSE_STROKE_INDEX = [
+        10,6,16,4,18,12,14,2,8,
+        5,11,17,1,13,3,7,15,9
+      ];
 
       // Header-ish / non-player names
       const isTeamLike = name => {
@@ -376,9 +389,12 @@
             };
           }),
 
-          // Use one par set for now; we can split by gender later if needed
+          // Pars and static yardages for Chart Hills
           parsMen: parsedPars,
-          parsWomen: parsedPars
+          parsWomen: parsedPars,
+          yardsMen: COURSE_YARDS_MEN,
+          yardsWomen: COURSE_YARDS_WOMEN,
+          strokeIndex: COURSE_STROKE_INDEX
         };
       }
 
@@ -395,7 +411,7 @@
 
       // ---------- App ----------
       function App(){
-        const [view,setView] = useState('home'); // home | past | event | ratings | standings | eclectic
+        const [view,setView] = useState('home'); // home | past | event | ratings | standings | eclectic | holes
 
         // Supabase
         const defaultURL="https://mqknahdfpqxrpgpxqtus.supabase.co";
@@ -416,6 +432,11 @@
           men: COURSE_DEFAULT_MEN,
           women: COURSE_DEFAULT_WOMEN
         });
+        const [courseYards, setCourseYards] = useState({
+          men: COURSE_YARDS_MEN,
+          women: COURSE_YARDS_WOMEN
+        });
+        const [selectedPlayer, setSelectedPlayer] = useState('');
         const fileInputRef = useRef(null);
 
         useEffect(()=>{ // init supabase + fetch
@@ -477,12 +498,18 @@
           if(r.error){ alert('Download failed: '+r.error.message); return; }
           const text=await r.data.text();
           const parsed=parseSquabbitCSV(text);
-          setPlayers(parsed.players||[]);
+          const ps = parsed.players || [];
+          setPlayers(ps);
           setEventName(item.name);
           setCoursePars({
             men: parsed.parsMen || COURSE_DEFAULT_MEN,
             women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
           });
+          setCourseYards({
+            men: parsed.yardsMen || COURSE_YARDS_MEN,
+            women: parsed.yardsWomen || COURSE_YARDS_WOMEN
+          });
+          setSelectedPlayer(ps[0]?.name || '');
           setView('event'); // go to event screen
           toast('Event loaded');
         }
@@ -538,6 +565,120 @@
           }
           return out.sort((a,b)=>a.position-b.position);
         },[players]);
+
+        // Field baseline per hole: average Stableford points by hole
+        const holeFieldStats = useMemo(() => {
+          if (!players.length) return [];
+
+          const menPars   = coursePars.men   || COURSE_DEFAULT_MEN;
+          const womenPars = coursePars.women || COURSE_DEFAULT_WOMEN;
+          const menYards  = courseYards.men  || COURSE_YARDS_MEN;
+          const womenYards= courseYards.women|| COURSE_YARDS_WOMEN;
+
+          const nHoles = 18;
+          const stats = Array.from({ length: nHoles }, (_, i) => ({
+            hole: i + 1,
+            parMen: menPars[i] || 4,
+            parWomen: womenPars[i] || menPars[i] || 4,
+            yardsMen: menYards[i] || null,
+            yardsWomen: womenYards[i] || null,
+            si: COURSE_STROKE_INDEX[i] || null,
+            totalPts: 0,
+            count: 0
+          }));
+
+          players.forEach(p => {
+            const perHole = p.perHole || [];
+            for (let i = 0; i < nHoles; i++) {
+              const pts = Number(perHole[i]) || 0;
+              stats[i].totalPts += pts;
+              stats[i].count++;
+            }
+          });
+
+          stats.forEach(h => {
+            h.avgFieldPts = h.count ? h.totalPts / h.count : 0;
+          });
+
+          return stats;
+        }, [players, coursePars, courseYards]);
+
+        // Player-specific stats vs field, per hole + by distance bucket
+        const playerHoleStats = useMemo(() => {
+          if (!selectedPlayer || !players.length || !holeFieldStats.length) return null;
+
+          const p = players.find(pl => pl.name === selectedPlayer);
+          if (!p) return null;
+
+          const perHole = p.perHole || [];
+          const menPars   = coursePars.men   || COURSE_DEFAULT_MEN;
+          const womenPars = coursePars.women || COURSE_DEFAULT_WOMEN;
+          const menYards  = courseYards.men  || COURSE_YARDS_MEN;
+          const womenYards= courseYards.women|| COURSE_YARDS_WOMEN;
+
+          const isFemale = (p.gender === 'F');
+          const pars   = isFemale ? (womenPars || menPars) : menPars;
+          const yards  = isFemale ? (womenYards || menYards) : menYards;
+
+          const classifyByDistance = (par, y) => {
+            if (!y) return '';
+            if (par === 3) {
+              if (y < 150) return 'Short par 3';
+              if (y <= 180) return 'Mid par 3';
+              return 'Long par 3';
+            }
+            if (par === 4) {
+              if (y < 360) return 'Short par 4';
+              if (y <= 410) return 'Mid par 4';
+              return 'Long par 4';
+            }
+            if (par === 5) {
+              if (y < 500) return 'Reachable par 5';
+              return 'Long par 5';
+            }
+            return '';
+          };
+
+          const holes = holeFieldStats.map((h, i) => {
+            const pts = Number(perHole[i]) || 0;
+            const par = pars[i] || 4;
+            const yds = yards[i] || null;
+            const fieldAvg = h.avgFieldPts || 0;
+            const diffVsField = pts - fieldAvg; // +ve = better than field
+
+            return {
+              hole: i + 1,
+              par,
+              yards: yds,
+              si: COURSE_STROKE_INDEX[i] || null,
+              pts,
+              fieldAvg,
+              diffVsField,
+              bucket: classifyByDistance(par, yds)
+            };
+          });
+
+          // Aggregation by distance bucket
+          const bucketMap = {};
+          holes.forEach(h => {
+            const key = h.bucket || 'Other';
+            if (!bucketMap[key]) {
+              bucketMap[key] = { name: key, totalPts: 0, totalField: 0, count: 0 };
+            }
+            bucketMap[key].totalPts += h.pts;
+            bucketMap[key].totalField += h.fieldAvg;
+            bucketMap[key].count++;
+          });
+
+          const buckets = Object.values(bucketMap).map(b => ({
+            ...b,
+            avgPts: b.count ? b.totalPts / b.count : 0,
+            avgField: b.count ? b.totalField / b.count : 0,
+            diffVsField: b.count ? (b.totalPts - b.totalField) / b.count : 0
+          }));
+
+          return { player: p, holes, buckets };
+        }, [selectedPlayer, players, holeFieldStats, coursePars, courseYards]);
 
         async function fetchSeasonWith(c){
           const r = await c
@@ -778,6 +919,12 @@
                   </button>
                   <button
                     className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
+                    onClick={()=>setView('holes')}
+                  >
+                    Player Hole Analysis
+                  </button>
+                  <button
+                    className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
                     onClick={()=>setView('standings')}
                   >
                     Check Season Standings
@@ -806,12 +953,18 @@
                         if(!f) return;
                         const text=await f.text();
                         const parsed=parseSquabbitCSV(text);
-                        setPlayers(parsed.players||[]);
+                        const ps = parsed.players || [];
+                        setPlayers(ps);
                         setEventName((f.name||'').replace(/\.[^.]+$/,''));
                         setCoursePars({
                           men: parsed.parsMen || COURSE_DEFAULT_MEN,
                           women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
                         });
+                        setCourseYards({
+                          men: parsed.yardsMen || COURSE_YARDS_MEN,
+                          women: parsed.yardsWomen || COURSE_YARDS_WOMEN
+                        });
+                        setSelectedPlayer(ps[0]?.name || '');
                         setView('event');
                         e.target.value='';
                       }catch(err){
@@ -1169,6 +1322,204 @@
           );
         }
 
+        function PlayerHoleAnalysis(){
+          const stats = playerHoleStats;
+          const allPlayers = players.filter(p => !isTeamLike(p.name));
+
+          const describeDiff = d => {
+            if (d >= 0.6) return 'Big gain vs field';
+            if (d >= 0.25) return 'Gains vs field';
+            if (d > -0.1) return 'About level';
+            if (d > -0.4) return 'Loses a bit';
+            return 'Loses a lot';
+          };
+
+          const diffClass = d => {
+            if (d >= 0.6) return 'bg-emerald-200 text-emerald-900';
+            if (d >= 0.25) return 'bg-emerald-100 text-emerald-800';
+            if (d > -0.1) return 'bg-neutral-100 text-neutral-800';
+            if (d > -0.4) return 'bg-amber-100 text-amber-800';
+            return 'bg-red-100 text-red-800';
+          };
+
+          if (!allPlayers.length) {
+            return (
+              <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-semibold text-squab-900">
+                    Player hole analysis
+                  </h2>
+                  <button className="btn border border-squab-200" onClick={()=>setView('home')}>
+                    Back
+                  </button>
+                </div>
+                <p className="text-sm text-neutral-600">
+                  Load an event first to see per-player analysis.
+                </p>
+              </section>
+            );
+          }
+
+          const currentPlayerName = selectedPlayer || allPlayers[0].name;
+          const currentStats = (stats && stats.player && stats.player.name === currentPlayerName)
+            ? stats
+            : playerHoleStats; // fallback, but memo should be in sync
+
+          const holes = currentStats?.holes || [];
+          const buckets = currentStats?.buckets || [];
+
+          const gains = [...holes].sort((a,b)=>b.diffVsField - a.diffVsField).slice(0,3);
+          const losses = [...holes].sort((a,b)=>a.diffVsField - b.diffVsField).slice(0,3);
+
+          return (
+            <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-squab-900">
+                  Player hole analysis — {eventName || 'This Event'}
+                </h2>
+                <button className="btn border border-squab-200" onClick={()=>setView('home')}>
+                  Back
+                </button>
+              </div>
+
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <label className="text-sm text-neutral-700">
+                  Player:
+                  <select
+                    className="ml-2 rounded-lg border border-squab-200 px-2 py-1 text-sm"
+                    value={currentPlayerName}
+                    onChange={e=>setSelectedPlayer(e.target.value)}
+                  >
+                    {allPlayers.map(p=>(
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="text-xs text-neutral-500">
+                  Values are Stableford points; difference is player minus field average on that hole.
+                </p>
+              </div>
+
+              {holes.length === 0 && (
+                <p className="text-sm text-neutral-600">
+                  No per-hole data found for this player.
+                </p>
+              )}
+
+              {holes.length > 0 && (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2 mb-4 text-xs md:text-sm">
+                    <div className="rounded-xl border border-squab-200 bg-squab-50 p-3">
+                      <h3 className="font-semibold mb-1 text-squab-900 text-sm">
+                        Biggest gains vs field
+                      </h3>
+                      <ul className="space-y-1">
+                        {gains.map(h=>(
+                          <li key={h.hole} className="flex justify-between">
+                            <span>
+                              H{h.hole} • {h.yards || '—'}y • Par {h.par}
+                            </span>
+                            <span className="font-medium">
+                              {h.diffVsField >= 0 ? '+' : ''}{h.diffVsField.toFixed(2)} pts
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="rounded-xl border border-squab-200 bg-squab-50 p-3">
+                      <h3 className="font-semibold mb-1 text-squab-900 text-sm">
+                        Biggest leaks vs field
+                      </h3>
+                      <ul className="space-y-1">
+                        {losses.map(h=>(
+                          <li key={h.hole} className="flex justify-between">
+                            <span>
+                              H{h.hole} • {h.yards || '—'}y • Par {h.par}
+                            </span>
+                            <span className="font-medium">
+                              {h.diffVsField >= 0 ? '+' : ''}{h.diffVsField.toFixed(2)} pts
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <h3 className="font-semibold text-sm text-squab-900 mb-1">
+                      By distance type
+                    </h3>
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-squab-200 text-left">
+                            <th>Bucket</th>
+                            <th>Holes</th>
+                            <th>Avg pts</th>
+                            <th>Field avg</th>
+                            <th>Diff vs field</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {buckets.map(b=>(
+                            <tr key={b.name} className="border-b border-squab-200">
+                              <td>{b.name}</td>
+                              <td>{b.count}</td>
+                              <td>{b.avgPts.toFixed(2)}</td>
+                              <td>{b.avgField.toFixed(2)}</td>
+                              <td>
+                                <span className={`px-2 py-0.5 rounded-lg text-[0.7rem] font-medium ${diffClass(b.diffVsField)}`}>
+                                  {b.diffVsField >= 0 ? '+' : ''}{b.diffVsField.toFixed(2)} ({describeDiff(b.diffVsField)})
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-xs md:text-sm">
+                      <thead>
+                        <tr className="border-b border-squab-200 text-left">
+                          <th>Hole</th>
+                          <th>Par</th>
+                          <th>SI</th>
+                          <th>Yards</th>
+                          <th>Player pts</th>
+                          <th>Field avg</th>
+                          <th>Diff vs field</th>
+                          <th>Bucket</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {holes.map(h=>(
+                          <tr key={h.hole} className="border-b border-squab-200">
+                            <td>H{h.hole}</td>
+                            <td>{h.par}</td>
+                            <td>{h.si ?? ''}</td>
+                            <td>{h.yards || '—'}</td>
+                            <td>{h.pts.toFixed(1)}</td>
+                            <td>{h.fieldAvg.toFixed(2)}</td>
+                            <td>
+                              <span className={`px-2 py-0.5 rounded-lg text-[0.7rem] font-medium ${diffClass(h.diffVsField)}`}>
+                                {h.diffVsField >= 0 ? '+' : ''}{h.diffVsField.toFixed(2)}
+                              </span>
+                            </td>
+                            <td>{h.bucket}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        }
+
         return (
           <div className="min-h-screen p-4 sm:p-6">
             <div className="max-w-4xl mx-auto space-y-4">
@@ -1179,6 +1530,7 @@
               {view==='ratings' && <Ratings />}
               {view==='standings' && <Standings />}
               {view==='eclectic' && <Eclectic />}
+              {view==='holes' && <PlayerHoleAnalysis />}
             </div>
           </div>
         );
