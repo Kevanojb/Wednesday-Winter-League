@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Wednesday Winter League — League & Eclectic</title>
+    <title>Winter League — Events & Eclectic</title>
     <link rel="icon" href="./favicon.ico" />
     <meta name="theme-color" content="#199f57" />
-    <meta property="og:title" content="Wednesday Winter League — League & Eclectic" />
+    <meta property="og:title" content="Winter League — Events & Eclectic" />
     <meta property="og:description" content="Event results, ratings, standings, player hole analysis and eclectic leaderboard." />
 
     <!-- Tailwind Config FIRST -->
@@ -124,27 +124,6 @@
       }
 
       // -----------------------
-      // Default / fallback course data
-      // -----------------------
-
-      const COURSE_DEFAULT_MEN = [4,4,3,4,5,4,3,4,4, 4,5,4,3,4,4,5,3,4];
-      const COURSE_DEFAULT_WOMEN = [4,4,3,4,5,4,3,4,4, 4,4,5,3,4,4,5,3,4];
-
-      const COURSE_YARDS_MEN = [
-        564,443,166,402,487,300,185,404,353,
-        407,159,529,416,375,409,505,136,413
-      ];
-      const COURSE_YARDS_WOMEN = [
-        498,364,111,329,420,230,147,358,276,
-        391,127,412,347,305,363,402,78,345
-      ];
-
-      const COURSE_STROKE_INDEX = [
-        10,6,16,4,18,12,14,2,8,
-        5,11,17,1,7,3,13,15,9
-      ];
-
-      // -----------------------
       // Handicap Maths
       // -----------------------
 
@@ -232,7 +211,7 @@
       }
 
       // -----------------------
-      // CourseLayout parser
+      // CourseLayout parser (same logic as Den)
       // -----------------------
 
       function parseCourseLayout(lines) {
@@ -333,15 +312,15 @@
       }
 
       // -----------------------
-      // Main Squabbit CSV parser
+      // Main Squabbit CSV parser (WINTER: no default course data)
       // -----------------------
 
       function parseSquabbitCSV(text){
         const rows = text.replace(/\r/g,'').split('\n');
         const lines = rows.map(splitSmart);
 
-        // --- fallback PAR row (old CSVs) ---
-        let parsedPars=null;
+        // --- Optional PAR row (from CSV only, no defaults) ---
+        let parsedPars = null;
         for(let i=0;i<lines.length;i++){
           const row=lines[i];
           if((row[0]||'').trim().toLowerCase()==='par'){
@@ -361,19 +340,52 @@
             break;
           }
         }
-        if(!parsedPars || parsedPars.length!==18){
-          parsedPars = COURSE_DEFAULT_MEN.slice();
-        }
 
-        // --- CourseLayout block (preferred) ---
+        // --- CourseLayout block (REQUIRED for Winter) ---
         const layout = parseCourseLayout(lines);
 
-        let parsMen   = layout?.parsMen   || parsedPars;
-        let parsWomen = layout?.parsWomen || parsedPars;
-        let yardsMen  = layout?.yardsMen  || COURSE_YARDS_MEN;
-        let yardsWomen= layout?.yardsWomen|| COURSE_YARDS_WOMEN;
-        let strokeMen = layout?.strokeIndexMen || COURSE_STROKE_INDEX;
-        let strokeWomen = layout?.strokeIndexWomen || strokeMen;
+        if (
+          !layout ||
+          !Array.isArray(layout.yardsMen) ||
+          layout.yardsMen.length !== 18 ||
+          layout.yardsMen.every(y => !y)
+        ) {
+          throw new Error("No valid CourseLayout with yards found in CSV (Winter League).");
+        }
+
+        // Pars
+        let parsMen = layout.parsMen;
+        if (!parsMen || parsMen.length !== 18) {
+          if (parsedPars && parsedPars.length === 18) {
+            parsMen = parsedPars;
+          } else {
+            throw new Error("No valid pars found in CourseLayout or PAR row.");
+          }
+        }
+
+        let parsWomen = layout.parsWomen;
+        if (!parsWomen || parsWomen.length !== 18) {
+          // If no separate women's pars, mirror men's (still CSV-derived)
+          parsWomen = parsMen;
+        }
+
+        // Yards
+        const yardsMen = layout.yardsMen;
+        let yardsWomen = layout.yardsWomen;
+        if (!yardsWomen || yardsWomen.length !== 18 || yardsWomen.every(y => !y)) {
+          yardsWomen = yardsMen;
+        }
+
+        // Stroke index
+        let strokeMen = layout.strokeIndexMen;
+        if (!strokeMen || strokeMen.length !== 18 || strokeMen.every(si => !si)) {
+          throw new Error("No valid stroke index found in CourseLayout.");
+        }
+
+        let strokeWomen = layout.strokeIndexWomen;
+        if (!strokeWomen || strokeWomen.length !== 18 || strokeWomen.every(si => !si)) {
+          strokeWomen = strokeMen;
+        }
 
         // --- Roster detection ---
         let playerHeaderRow=-1;
@@ -539,8 +551,8 @@
         const SUPA_URL = "https://mqknahdfpqxrpgpxqtus.supabase.co";
         const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
 
-        const BUCKET = "winter_league";
-        const STANDINGS_TABLE = "winter_league_standings";
+        const BUCKET = "winter_league";          // <<<<<< winter bucket
+        const STANDINGS_TABLE = "season_standings";
         const PREFIX = "events"; // folder in bucket
 
         const [client, setClient] = useState(null);
@@ -551,21 +563,21 @@
 
         const [players, setPlayers] = useState([]);
         const [season, setSeason] = useState({});
-        const [eventName, setEventName] = useState("Wednesday Winter League");
+        const [eventName, setEventName] = useState("Winter League");
 
         const [coursePars, setCoursePars] = useState({
-          men: COURSE_DEFAULT_MEN,
-          women: COURSE_DEFAULT_WOMEN
+          men: Array(18).fill(0),
+          women: Array(18).fill(0)
         });
 
         const [courseYards, setCourseYards] = useState({
-          men: COURSE_YARDS_MEN,
-          women: COURSE_YARDS_WOMEN
+          men: Array(18).fill(0),
+          women: Array(18).fill(0)
         });
 
         const [courseStrokeIndex, setCourseStrokeIndex] = useState({
-          men: COURSE_STROKE_INDEX,
-          women: COURSE_STROKE_INDEX
+          men: Array(18).fill(0),
+          women: Array(18).fill(0)
         });
 
         const fileInputRef = useRef(null);
@@ -649,7 +661,7 @@
           setSharedGroups(groupEventsByYear(data));
         }
 
-        // Load event from Supabase
+        // Load event from Supabase (Winter – CSV must contain CourseLayout)
         async function loadShared(item) {
           if (!client) {
             alert("Supabase client not ready");
@@ -663,24 +675,31 @@
           }
 
           const text = await r.data.text();
-          const parsed = parseSquabbitCSV(text);
+          let parsed;
+          try {
+            parsed = parseSquabbitCSV(text);
+          } catch (err) {
+            alert(err?.message || "Failed to parse CSV (Winter League).");
+            return;
+          }
 
           const ps = parsed.players || [];
           setPlayers(ps);
           setSelectedPlayer(ps[0]?.name || '');
 
           setEventName(item.name);
+
           setCoursePars({
-            men: parsed.parsMen || COURSE_DEFAULT_MEN,
-            women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
+            men: parsed.parsMen,
+            women: parsed.parsWomen
           });
           setCourseYards({
-            men: parsed.yardsMen || COURSE_YARDS_MEN,
-            women: parsed.yardsWomen || COURSE_YARDS_WOMEN
+            men: parsed.yardsMen,
+            women: parsed.yardsWomen
           });
           setCourseStrokeIndex({
-            men: parsed.strokeIndexMen || COURSE_STROKE_INDEX,
-            women: parsed.strokeIndexWomen || parsed.strokeIndexMen || COURSE_STROKE_INDEX
+            men: parsed.strokeIndexMen,
+            women: parsed.strokeIndexWomen
           });
 
           setView('event');
@@ -725,9 +744,16 @@
           setSeason(map);
         }
 
-        // Import CSV (local)
+        // Import CSV (local) – Winter rules
         function importLocalCSV(text, filename) {
-          const parsed = parseSquabbitCSV(text);
+          let parsed;
+          try {
+            parsed = parseSquabbitCSV(text);
+          } catch (err) {
+            alert(err?.message || "Failed to parse CSV (Winter League).");
+            return;
+          }
+
           const ps = parsed.players || [];
 
           setPlayers(ps);
@@ -735,16 +761,16 @@
           setEventName((filename || "").replace(/\.[^.]+$/, ""));
 
           setCoursePars({
-            men: parsed.parsMen || COURSE_DEFAULT_MEN,
-            women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
+            men: parsed.parsMen,
+            women: parsed.parsWomen
           });
           setCourseYards({
-            men: parsed.yardsMen || COURSE_YARDS_MEN,
-            women: parsed.yardsWomen || COURSE_YARDS_WOMEN
+            men: parsed.yardsMen,
+            women: parsed.yardsWomen
           });
           setCourseStrokeIndex({
-            men: parsed.strokeIndexMen || COURSE_STROKE_INDEX,
-            women: parsed.strokeIndexWomen || parsed.strokeIndexMen || COURSE_STROKE_INDEX
+            men: parsed.strokeIndexMen,
+            women: parsed.strokeIndexWomen
           });
 
           setView('event');
@@ -966,7 +992,7 @@
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <h1 className="text-xl md:text-2xl font-bold tracking-tight">
-                    Wednesday Winter League — League & Eclectic
+                    Winter League — Events & Eclectic
                   </h1>
                   <p className="text-xs text-white/90">Supabase: {statusMsg}</p>
                 </div>
@@ -1011,7 +1037,7 @@
                     className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
                     onClick={() => setView('past')}
                   >
-                    View Past Winter League Events
+                    View Past Winter Events
                   </button>
 
                   <button
@@ -1099,12 +1125,12 @@
           );
         }
 
-        // Past events screen
+        // Past events screen: one dropdown per year, year based on filename
         function PastEvents({ sharedGroups, loadShared, setView }) {
           return (
             <section className="rounded-2xl p-3 md:p-4 bg-white border border-squab-200 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-lg font-semibold text-squab-900">Past Winter League Events</h2>
+                <h2 className="text-lg font-semibold text-squab-900">Past Winter Events</h2>
                 <button className="btn border border-squab-200" onClick={() => setView('home')}>Back</button>
               </div>
 
