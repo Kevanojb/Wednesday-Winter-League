@@ -211,29 +211,41 @@
       }
 
       // -----------------------
-      // CourseLayout parser (same logic as Den)
+      // CourseLayout parser (multi-tee + simple FINAL support)
       // -----------------------
 
-      function parseCourseLayout(lines) {
-        let startIdx = -1;
-        for (let i = 0; i < lines.length; i++) {
-          const k = (lines[i][0] || '').trim().toLowerCase();
-          if (k === 'courselayout') {
-            startIdx = i;
-            break;
-          }
-        }
-        if (startIdx < 0) return null;
+      // MULTI-TEE format:
+      // CourseLayout
+      // Course,Chart Hills
+      // Tee,61 Men,M
+      // Hole,Par,Yards,SI
+      // ...
+      //
+      // SIMPLE format:
+      // CourseLayout
+      // Hole,MensYards,MensPar,MensSI[,WomensYards,WomensPar,WomensSI,...]
+      // 1,537,5,10,...
+      //
+      // Returns:
+      // {
+      //   courseName,
+      //   tees: [
+      //     { teeName, gender: 'M'|'F', pars:[], yards:[], si:[] },
+      //     ...
+      //   ]
+      // }
 
+      function parseMultiTeeCourseLayout(lines, startIdx) {
         let courseName = '';
-        let men = null;
-        let women = null;
+        const tees = [];
 
         let i = startIdx + 1;
         while (i < lines.length) {
           const row = lines[i] || [];
           const key = (row[0] || '').trim().toLowerCase();
+
           if (!key) { i++; continue; }
+          if (key === 'courselayout') break; // next block
 
           if (key === 'course') {
             courseName = (row[1] || '').trim() || courseName;
@@ -254,6 +266,11 @@
             const colYards = header.findIndex(c => String(c).trim().toLowerCase() === 'yards');
             const colSI = header.findIndex(c => String(c).trim().toLowerCase() === 'si');
 
+            if (colYards < 0 || colPar < 0 || colSI < 0) {
+              i += 2;
+              continue;
+            }
+
             const holes = Array(18).fill(null).map((_, idx) => ({
               hole: idx + 1,
               par: 0,
@@ -271,9 +288,9 @@
               const h = parseInt(r[0], 10);
               if (!Number.isFinite(h) || h < 1 || h > 18) break;
 
-              const par = colPar >= 0 ? parseInt(r[colPar] || '0', 10) : 0;
-              const yards = colYards >= 0 ? parseInt(r[colYards] || '0', 10) : 0;
-              const si = colSI >= 0 ? parseInt(r[colSI] || '0', 10) : 0;
+              const par = parseInt(r[colPar] || '0', 10);
+              const yards = parseInt(r[colYards] || '0', 10);
+              const si = parseInt(r[colSI] || '0', 10);
 
               holes[h - 1] = { hole: h, par, yards, si };
               j++;
@@ -283,11 +300,7 @@
             const yards = holes.map(h => h.yards || 0);
             const siArr = holes.map(h => h.si || 0);
 
-            if (gender === 'F') {
-              women = { pars, yards, si: siArr, teeName };
-            } else {
-              men = { pars, yards, si: siArr, teeName };
-            }
+            tees.push({ teeName, gender, pars, yards, si: siArr });
 
             i = j;
             continue;
@@ -296,30 +309,156 @@
           i++;
         }
 
-        if (!men && !women) return null;
-        if (!men && women) men = women;
-        if (!women && men) women = men;
+        if (!tees.length) return null;
+        return { courseName, tees };
+      }
 
-        return {
-          courseName,
-          parsMen: men.pars,
-          yardsMen: men.yards,
-          strokeIndexMen: men.si,
-          parsWomen: women.pars,
-          yardsWomen: women.yards,
-          strokeIndexWomen: women.si
-        };
+      function parseSimpleCourseLayout(lines, startIdx) {
+        // Look for "Hole,MensYards,MensPar,MensSI,..." header
+        let headerIdx = -1;
+        for (let i = startIdx + 1; i < lines.length; i++) {
+          const row = lines[i] || [];
+          const first = (row[0] || '').trim().toLowerCase();
+          if (!first) continue;
+          if (first === 'courselayout') break;
+          if (first === 'hole') {
+            headerIdx = i;
+            break;
+          }
+        }
+        if (headerIdx < 0) return null;
+
+        const header = lines[headerIdx].map(h => String(h || ''));
+        const norm = s => s.replace(/\s+/g,'').toLowerCase();
+
+        const idxMensYards = header.findIndex(c => norm(c) === 'mensyards');
+        const idxMensPar   = header.findIndex(c => norm(c) === 'menspar');
+        const idxMensSI    = header.findIndex(c => norm(c) === 'menssi');
+
+        const idxWomYards = header.findIndex(c => norm(c) === 'womensyards' || norm(c) === 'ladiesyards');
+        const idxWomPar   = header.findIndex(c => norm(c) === 'womenspar' || norm(c) === 'ladiespar');
+        const idxWomSI    = header.findIndex(c => norm(c) === 'womenssi' || norm(c) === 'ladiessi');
+
+        if (idxMensYards < 0 || idxMensPar < 0 || idxMensSI < 0) {
+          return null;
+        }
+
+        const holesMen = Array(18).fill(null).map((_, idx) => ({
+          hole: idx + 1,
+          par: 0,
+          yards: 0,
+          si: 0
+        }));
+
+        const holesWom = Array(18).fill(null).map((_, idx) => ({
+          hole: idx + 1,
+          par: 0,
+          yards: 0,
+          si: 0
+        }));
+
+        let i = headerIdx + 1;
+        while (i < lines.length) {
+          const row = lines[i] || [];
+          const first = (row[0] || '').trim().toLowerCase();
+          if (!first || first === 'courselayout') break;
+
+          const h = parseInt(row[0], 10);
+          if (!Number.isFinite(h) || h < 1 || h > 18) break;
+
+          const mPar = parseInt(row[idxMensPar] || '0', 10);
+          const mYards = parseInt(row[idxMensYards] || '0', 10);
+          const mSI = parseInt(row[idxMensSI] || '0', 10);
+
+          holesMen[h - 1] = { hole: h, par: mPar, yards: mYards, si: mSI };
+
+          if (idxWomPar >= 0 && idxWomYards >= 0 && idxWomSI >= 0) {
+            const wPar = parseInt(row[idxWomPar] || '0', 10);
+            const wYards = parseInt(row[idxWomYards] || '0', 10);
+            const wSI = parseInt(row[idxWomSI] || '0', 10);
+            holesWom[h - 1] = { hole: h, par: wPar, yards: wYards, si: wSI };
+          }
+
+          i++;
+        }
+
+        const parsMen = holesMen.map(h => h.par || 0);
+        const yardsMen = holesMen.map(h => h.yards || 0);
+        const siMen = holesMen.map(h => h.si || 0);
+
+        const hasWomenData = idxWomYards >= 0 && holesWom.some(h => h.yards > 0);
+        const parsWomen = hasWomenData ? holesWom.map(h => h.par || 0) : parsMen.slice();
+        const yardsWomen = hasWomenData ? holesWom.map(h => h.yards || 0) : yardsMen.slice();
+        const siWomen = hasWomenData ? holesWom.map(h => h.si || 0) : siMen.slice();
+
+        const tees = [
+          { teeName: 'Men', gender:'M', pars:parsMen, yards:yardsMen, si:siMen },
+          { teeName: 'Women', gender:'F', pars:parsWomen, yards:yardsWomen, si:siWomen }
+        ];
+
+        return { courseName:'', tees };
+      }
+
+      function parseCourseLayout(lines) {
+        // find first "CourseLayout" marker
+        let startIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+          const first = (lines[i][0] || '').trim().toLowerCase();
+          if (first === 'courselayout') { startIdx = i; break; }
+        }
+        if (startIdx < 0) return null;
+
+        // detect if multi-tee section exists
+        let hasTee = false;
+        for (let i = startIdx + 1; i < lines.length; i++) {
+          const first = (lines[i][0] || '').trim().toLowerCase();
+          if (first === 'tee') { hasTee = true; break; }
+          if (first === 'courselayout') break;
+        }
+
+        if (hasTee) {
+          return parseMultiTeeCourseLayout(lines, startIdx);
+        } else {
+          return parseSimpleCourseLayout(lines, startIdx);
+        }
+      }
+
+      // Choose tee for a player based on teeLabel and gender
+      function chooseTeeForPlayer(player, courseTees) {
+        if (!courseTees || !courseTees.length) return null;
+        const label = (player.teeLabel || '').toLowerCase();
+        const gender = (player.gender || 'M').toUpperCase();
+
+        // 1) exact tee name match
+        if (label) {
+          let t = courseTees.find(tt => (tt.teeName || '').toLowerCase() === label);
+          if (t) return t;
+
+          // 2) fuzzy contains match
+          t = courseTees.find(tt => {
+            const n = (tt.teeName || '').toLowerCase();
+            return n && (n.includes(label) || label.includes(n));
+          });
+          if (t) return t;
+        }
+
+        // 3) match by gender
+        let t = courseTees.find(tt => (tt.gender || 'M').toUpperCase() === gender);
+        if (t) return t;
+
+        // 4) fallback to first tee (still CSV-defined)
+        return courseTees[0];
       }
 
       // -----------------------
-      // Main Squabbit CSV parser (WINTER: no default course data)
+      // Main Squabbit CSV parser (Winter: no defaults)
       // -----------------------
 
       function parseSquabbitCSV(text){
         const rows = text.replace(/\r/g,'').split('\n');
         const lines = rows.map(splitSmart);
 
-        // --- Optional PAR row (from CSV only, no defaults) ---
+        // --- Optional PAR row (only used if CourseLayout pars are missing) ---
         let parsedPars = null;
         for(let i=0;i<lines.length;i++){
           const row=lines[i];
@@ -341,51 +480,49 @@
           }
         }
 
-        // --- CourseLayout block (REQUIRED for Winter) ---
-        const layout = parseCourseLayout(lines);
+        // --- CourseLayout block (REQUIRED for Winter yardages) ---
+        const layoutRaw = parseCourseLayout(lines);
 
         if (
-          !layout ||
-          !Array.isArray(layout.yardsMen) ||
-          layout.yardsMen.length !== 18 ||
-          layout.yardsMen.every(y => !y)
+          !layoutRaw ||
+          !Array.isArray(layoutRaw.tees) ||
+          layoutRaw.tees.length === 0
         ) {
-          throw new Error("No valid CourseLayout with yards found in CSV (Winter League).");
+          throw new Error("No CourseLayout block found in CSV (Winter League).");
         }
 
-        // Pars
-        let parsMen = layout.parsMen;
-        if (!parsMen || parsMen.length !== 18) {
-          if (parsedPars && parsedPars.length === 18) {
-            parsMen = parsedPars;
-          } else {
-            throw new Error("No valid pars found in CourseLayout or PAR row.");
+        // Ensure each tee has valid yards/pars/SI (or fail)
+        const tees = layoutRaw.tees.map(t => {
+          const yards = t.yards || [];
+          const parsIn = t.pars || [];
+          const siIn = t.si || [];
+
+          if (!yards.length || yards.length !== 18 || yards.every(y => !y)) {
+            throw new Error(`Tee "${t.teeName}" has invalid or missing yards (Winter League).`);
           }
-        }
 
-        let parsWomen = layout.parsWomen;
-        if (!parsWomen || parsWomen.length !== 18) {
-          // If no separate women's pars, mirror men's (still CSV-derived)
-          parsWomen = parsMen;
-        }
+          let pars = parsIn;
+          if (!pars || pars.length !== 18 || pars.every(p => !p)) {
+            if (parsedPars && parsedPars.length === 18) {
+              pars = parsedPars.slice();
+            } else {
+              throw new Error(`Tee "${t.teeName}" has no valid pars in CourseLayout or PAR row (Winter League).`);
+            }
+          }
 
-        // Yards
-        const yardsMen = layout.yardsMen;
-        let yardsWomen = layout.yardsWomen;
-        if (!yardsWomen || yardsWomen.length !== 18 || yardsWomen.every(y => !y)) {
-          yardsWomen = yardsMen;
-        }
+          let si = siIn;
+          if (!si || si.length !== 18 || si.every(v => !v)) {
+            throw new Error(`Tee "${t.teeName}" has invalid stroke index in CourseLayout (Winter League).`);
+          }
 
-        // Stroke index
-        let strokeMen = layout.strokeIndexMen;
-        if (!strokeMen || strokeMen.length !== 18 || strokeMen.every(si => !si)) {
-          throw new Error("No valid stroke index found in CourseLayout.");
-        }
-
-        let strokeWomen = layout.strokeIndexWomen;
-        if (!strokeWomen || strokeWomen.length !== 18 || strokeWomen.every(si => !si)) {
-          strokeWomen = strokeMen;
-        }
+          return {
+            teeName: t.teeName || '',
+            gender: (t.gender || 'M').toUpperCase(),
+            pars,
+            yards,
+            si
+          };
+        });
 
         // --- Roster detection ---
         let playerHeaderRow=-1;
@@ -407,24 +544,37 @@
             if(/^player$/i.test(name)) continue;
             const hcap = parseFloat((row[1]||'').trim());
             if(!Number.isNaN(hcap)){
-              players.push({ name, handicap:hcap, gender:'M' });
+              players.push({ name, handicap:hcap, gender:'M', teeLabel:'' });
             }
           }
         }
 
-        // --- Detect gender from tee labels ---
+        // --- Detect gender + tee label from tee mapping rows ---
         const genderMap={};
+        const teeLabelMap={};
+
         for(let r=0;r<lines.length;r++){
           const row=lines[r];
           if(!row) continue;
           const nm=(row[0]||'').trim();
           if(!nm) continue;
-          const tee=String(row[1]||'').toLowerCase();
-          if(/women|ladies|red tee/.test(tee)) genderMap[nm]='F';
-          else if(genderMap[nm]==null) genderMap[nm]='M';
+
+          const col1 = (row[1] || '').trim();
+          if (!col1) continue;
+
+          const teeLower = col1.toLowerCase();
+          teeLabelMap[nm] = col1;  // full label
+
+          if(/women|ladies|red tee|redtees?/.test(teeLower)) {
+            genderMap[nm]='F';
+          } else if (genderMap[nm]==null) {
+            genderMap[nm]='M';
+          }
         }
+
         for(const p of players){
           if(genderMap[p.name]) p.gender = genderMap[p.name];
+          if(teeLabelMap[p.name]) p.teeLabel = teeLabelMap[p.name];
         }
 
         // --- Summary stableford table ---
@@ -454,7 +604,7 @@
             totals[name] = numeric[numeric.length-1];
 
             if(!players.some(p=>p.name===name)){
-              players.push({ name, handicap:0, gender:genderMap[name]||'M' });
+              players.push({ name, handicap:0, gender:genderMap[name]||'M', teeLabel:teeLabelMap[name]||'' });
             }
           }
         }
@@ -522,6 +672,7 @@
           return {
             name:p.name,
             gender:p.gender||genderMap[p.name]||'M',
+            teeLabel:p.teeLabel||teeLabelMap[p.name]||'',
             handicap,
             points,
             back9:card.back9||0,
@@ -531,12 +682,8 @@
 
         return {
           players: finalPlayers,
-          parsMen,
-          parsWomen,
-          yardsMen,
-          yardsWomen,
-          strokeIndexMen: strokeMen,
-          strokeIndexWomen: strokeWomen
+          courseTees: tees,
+          courseName: layoutRaw.courseName || ''
         };
       }
 
@@ -551,34 +698,20 @@
         const SUPA_URL = "https://mqknahdfpqxrpgpxqtus.supabase.co";
         const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
 
-        const BUCKET = "winter_league";          // <<<<<< winter bucket
+        const BUCKET = "winter_league";
         const STANDINGS_TABLE = "season_standings";
-        const PREFIX = "events"; // folder in bucket
+        const PREFIX = "events";
 
         const [client, setClient] = useState(null);
         const [statusMsg, setStatusMsg] = useState("Connecting…");
 
-        const [shared, setShared] = useState([]);
         const [sharedGroups, setSharedGroups] = useState([]);
 
         const [players, setPlayers] = useState([]);
         const [season, setSeason] = useState({});
         const [eventName, setEventName] = useState("Winter League");
-
-        const [coursePars, setCoursePars] = useState({
-          men: Array(18).fill(0),
-          women: Array(18).fill(0)
-        });
-
-        const [courseYards, setCourseYards] = useState({
-          men: Array(18).fill(0),
-          women: Array(18).fill(0)
-        });
-
-        const [courseStrokeIndex, setCourseStrokeIndex] = useState({
-          men: Array(18).fill(0),
-          women: Array(18).fill(0)
-        });
+        const [courseTees, setCourseTees] = useState([]);
+        const [courseName, setCourseName] = useState("");
 
         const fileInputRef = useRef(null);
 
@@ -617,7 +750,6 @@
           return () => { cancelled = true };
         }, []);
 
-        // Group events by year
         function groupEventsByYear(files) {
           const groups = {};
           for (const f of files) {
@@ -633,7 +765,6 @@
             }));
         }
 
-        // Load shared events from Supabase Storage
         async function refreshShared(c) {
           c = c || client;
           if (!c) return;
@@ -648,7 +779,6 @@
             return;
           }
 
-          // RELAXED FILTER: only ignore hidden dot-files, don't require .csv extension
           const data = (r.data || [])
             .filter(x => !x.name.startsWith('.'))
             .map(x => ({
@@ -657,11 +787,9 @@
               path: `${PREFIX}/${x.name}`
             }));
 
-          setShared(data);
           setSharedGroups(groupEventsByYear(data));
         }
 
-        // Load event from Supabase (Winter – CSV must contain CourseLayout)
         async function loadShared(item) {
           if (!client) {
             alert("Supabase client not ready");
@@ -686,27 +814,14 @@
           const ps = parsed.players || [];
           setPlayers(ps);
           setSelectedPlayer(ps[0]?.name || '');
-
           setEventName(item.name);
-
-          setCoursePars({
-            men: parsed.parsMen,
-            women: parsed.parsWomen
-          });
-          setCourseYards({
-            men: parsed.yardsMen,
-            women: parsed.yardsWomen
-          });
-          setCourseStrokeIndex({
-            men: parsed.strokeIndexMen,
-            women: parsed.strokeIndexWomen
-          });
+          setCourseTees(parsed.courseTees || []);
+          setCourseName(parsed.courseName || "");
 
           setView('event');
           toast("Event loaded");
         }
 
-        // Load season table from Supabase
         async function fetchSeason(c) {
           c = c || client;
           if (!c) return;
@@ -744,7 +859,6 @@
           setSeason(map);
         }
 
-        // Import CSV (local) – Winter rules
         function importLocalCSV(text, filename) {
           let parsed;
           try {
@@ -755,28 +869,15 @@
           }
 
           const ps = parsed.players || [];
-
           setPlayers(ps);
           setSelectedPlayer(ps[0]?.name || "");
           setEventName((filename || "").replace(/\.[^.]+$/, ""));
-
-          setCoursePars({
-            men: parsed.parsMen,
-            women: parsed.parsWomen
-          });
-          setCourseYards({
-            men: parsed.yardsMen,
-            women: parsed.yardsWomen
-          });
-          setCourseStrokeIndex({
-            men: parsed.strokeIndexMen,
-            women: parsed.strokeIndexWomen
-          });
+          setCourseTees(parsed.courseTees || []);
+          setCourseName(parsed.courseName || "");
 
           setView('event');
         }
 
-        // Countback helper
         function compareByCountback(a,b){
           const pa=a.perHole||[];
           const pb=b.perHole||[];
@@ -798,7 +899,6 @@
           return 0;
         }
 
-        // Compute event leaderboard
         const computed = useMemo(() => {
           if (!players.length) return [];
 
@@ -806,6 +906,7 @@
             idx:i,
             name:p.name,
             gender:p.gender,
+            teeLabel:p.teeLabel,
             startExact:p.handicap,
             points:p.points,
             back9:p.back9,
@@ -829,7 +930,7 @@
           for(let k=1;k<topGroup.length;k++){
             const cmp=compareByCountback(topGroup[k],best[0]);
             if(cmp>0) best=[topGroup[k]];
-            else if(cmp===0) best.push(topGroup[k]);
+            else if(cmp===0) best.push(topGroup[k]];
           }
           const winnerIdxSet=new Set(best.map(r=>r.idx));
 
@@ -863,7 +964,6 @@
           return out.sort((a,b)=>a.position-b.position);
         }, [players]);
 
-        // Season: Add event
         async function addEventToSeason() {
           if (!computed.length) { toast("Load an event first"); return; }
           const next = { ...season };
@@ -919,7 +1019,6 @@
           }
         }
 
-        // Season: Remove event
         async function removeEventFromSeason() {
           if (!computed.length) { toast("Load an event first"); return; }
           if (!window.confirm("Remove this event from the season standings?")) return;
@@ -969,7 +1068,6 @@
           }
         }
 
-        // Season: clear
         async function clearSeason() {
           if (!client) { toast("No client"); return; }
           if (!window.confirm("⚠ This will delete ALL season standings. Continue?")) return;
@@ -982,11 +1080,7 @@
           }
         }
 
-        // ----------------------------------------------------
-        // Components
-        // ----------------------------------------------------
-
-        function Header({ eventName, statusMsg }) {
+        function Header({ eventName, statusMsg, courseName }) {
           return (
             <header className="hide-print rounded-2xl p-4 border border-squab-700 bg-squab-600 text-white shadow">
               <div className="flex items-center justify-between gap-2">
@@ -995,6 +1089,9 @@
                     Winter League — Events & Eclectic
                   </h1>
                   <p className="text-xs text-white/90">Supabase: {statusMsg}</p>
+                  {courseName && (
+                    <p className="text-xs text-white/80 mt-1">Course: {courseName}</p>
+                  )}
                 </div>
                 <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">
                   {eventName || "Untitled Event"}
@@ -1068,7 +1165,6 @@
                     Check Eclectic Leaderboard
                   </button>
 
-                  {/* Import CSV */}
                   <button
                     className="w-full text-left rounded-xl border border-squab-200 bg-white px-3 py-2"
                     onClick={() => fileInputRef.current && fileInputRef.current.click()}
@@ -1090,7 +1186,6 @@
                     }}
                   />
 
-                  {/* Add Event to Season */}
                   <button
                     className={`w-full text-left rounded-xl border px-3 py-2 ${
                       canAct ? 'border-squab-200 bg-white' : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
@@ -1101,7 +1196,6 @@
                     Add Event → Season
                   </button>
 
-                  {/* Remove Event */}
                   <button
                     className={`w-full text-left rounded-xl border px-3 py-2 ${
                       canAct ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
@@ -1112,7 +1206,6 @@
                     Remove Event ← Season
                   </button>
 
-                  {/* Delete Season */}
                   <button
                     className="w-full text-left rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-red-700"
                     onClick={clearSeason}
@@ -1125,7 +1218,6 @@
           );
         }
 
-        // Past events screen: one dropdown per year, year based on filename
         function PastEvents({ sharedGroups, loadShared, setView }) {
           return (
             <section className="rounded-2xl p-3 md:p-4 bg-white border border-squab-200 shadow-sm">
@@ -1174,6 +1266,7 @@
                     <tr className="border-b border-squab-200 text-left">
                       <th>#</th>
                       <th>Name</th>
+                      <th>Tee</th>
                       <th>Handicap</th>
                       <th>Stableford</th>
                       <th>Back9</th>
@@ -1185,7 +1278,7 @@
                   <tbody className="[&_tr:nth-child(even)]:bg-squab-50">
                     {computed.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="py-3 text-neutral-600">
+                        <td colSpan="8" className="py-3 text-neutral-600">
                           Load an event to see results.
                         </td>
                       </tr>
@@ -1195,6 +1288,7 @@
                       <tr key={i} className="border-b border-squab-200">
                         <td>{r.position}</td>
                         <td className="whitespace-nowrap">{r.name}</td>
+                        <td className="whitespace-nowrap text-xs">{r.teeLabel || '—'}</td>
                         <td>{Math.round(r.startExact)}</td>
                         <td>{r.points}</td>
                         <td>{r.back9}</td>
@@ -1209,10 +1303,7 @@
           );
         }
 
-        function Ratings({ computed, coursePars, setView }) {
-          const menPars = coursePars.men;
-          const womenPars = coursePars.women;
-
+        function Ratings({ computed, courseTees, setView }) {
           const ratingLabel = avg =>
             avg >= 3 ? 'Excellent' :
             avg >= 2.5 ? 'Good' :
@@ -1247,8 +1338,14 @@
 
           const ratings = useMemo(() => {
             return computed.map(r => {
-              const pars = r.gender === 'F' ? womenPars : menPars;
-              const av = eventParAverages(r.perHole, pars);
+              const tee = chooseTeeForPlayer(r, courseTees);
+              if (!tee) {
+                return {
+                  name:r.name,
+                  p3:0,p4:0,p5:0,total:0
+                };
+              }
+              const av = eventParAverages(r.perHole, tee.pars);
               return {
                 name: r.name,
                 p3: to1(av.p3),
@@ -1257,7 +1354,7 @@
                 total: to1(av.p3 + av.p4 + av.p5)
               };
             }).sort((a,b)=>b.total-a.total);
-          }, [computed, menPars, womenPars]);
+          }, [computed, courseTees]);
 
           return (
             <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
@@ -1401,10 +1498,7 @@
           computed,
           selectedPlayer,
           setSelectedPlayer,
-          coursePars,
-          courseYards,
-          strokeIndexMen,
-          strokeIndexWomen,
+          courseTees,
           setView
         }) {
           if (!computed.length) {
@@ -1419,15 +1513,23 @@
           const playerNames = computed.map((p) => p.name);
           const player = computed.find((p) => p.name === selectedPlayer) || computed[0];
 
+          const tee = chooseTeeForPlayer(player, courseTees);
+          if (!tee) {
+            return (
+              <section className="rounded-2xl p-4 bg-white border border-squab-200 shadow-sm">
+                <EventNav setView={setView} />
+                <p className="text-neutral-600">
+                  No tee layout found in CourseLayout for this player. Check the CSV tee names and player tee labels.
+                </p>
+              </section>
+            );
+          }
+
           const perHole = player.perHole || Array(18).fill(0);
-          const pars = coursePars[player.gender === "F" ? "women" : "men"];
-          const yards = courseYards[player.gender === "F" ? "women" : "men"];
+          const pars = tee.pars;
+          const yards = tee.yards;
+          const siArr = tee.si;
 
-          const siMenArr = strokeIndexMen || [];
-          const siWomenArr = strokeIndexWomen || siMenArr;
-          const siArr = player.gender === "F" ? siWomenArr : siMenArr;
-
-          // Field averages
           const fieldAvg = Array(18).fill(0);
           for (let h = 0; h < 18; h++) {
             const vals = computed.map((p) => Number(p.perHole[h]) || 0);
@@ -1468,9 +1570,12 @@
             <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
               <EventNav setView={setView} />
 
-              <h2 className="text-lg font-semibold text-squab-900 mb-3">
+              <h2 className="text-lg font-semibold text-squab-900 mb-1">
                 Player Hole Analysis
               </h2>
+              <p className="text-xs text-neutral-600 mb-3">
+                Tee for this player: <span className="font-semibold">{player.teeLabel || tee.teeName || 'Unknown'}</span>
+              </p>
 
               <div className="mb-4">
                 <label className="block text-sm font-medium mb-1">Select Player</label>
@@ -1564,11 +1669,10 @@
           );
         }
 
-        // Main app render
         return (
           <div className="min-h-screen p-4 sm:p-6">
             <div className="max-w-5xl mx-auto space-y-4">
-              <Header eventName={eventName} statusMsg={statusMsg} />
+              <Header eventName={eventName} statusMsg={statusMsg} courseName={courseName} />
 
               {view === 'home' && (
                 <Home
@@ -1600,7 +1704,7 @@
               {view === 'ratings' && (
                 <Ratings
                   computed={computed}
-                  coursePars={coursePars}
+                  courseTees={courseTees}
                   setView={setView}
                 />
               )}
@@ -1610,10 +1714,7 @@
                   computed={computed}
                   selectedPlayer={selectedPlayer}
                   setSelectedPlayer={setSelectedPlayer}
-                  coursePars={coursePars}
-                  courseYards={courseYards}
-                  strokeIndexMen={courseStrokeIndex.men}
-                  strokeIndexWomen={courseStrokeIndex.women}
+                  courseTees={courseTees}
                   setView={setView}
                 />
               )}
@@ -1636,7 +1737,6 @@
         );
       }
 
-      // Mount React App
       ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
   </body>
