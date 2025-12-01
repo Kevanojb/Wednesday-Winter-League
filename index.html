@@ -92,21 +92,6 @@
       const POINTS_TABLE = [20,17,15,13,11,9,8,7,6,5,4,3,2,1];
       const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-      const csvEscape = s => {
-        if (s == null) return "";
-        const str = String(s);
-        return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
-      };
-
-      const downloadCSV = (filename, rows) => {
-        const csv = rows.map(r => r.map(csvEscape).join(",")).join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        a.click();
-      };
-
       const to1 = x => Math.round((Number(x)||0)*10)/10;
 
       function toast(msg){
@@ -649,44 +634,6 @@
           setSharedGroups(groupEventsByYear(data));
         }
 
-        // Load event from Supabase
-        async function loadShared(item) {
-          if (!client) {
-            alert("Supabase client not ready");
-            return;
-          }
-
-          const r = await client.storage.from(BUCKET).download(item.path);
-          if (r.error) {
-            alert("Download failed: " + r.error.message);
-            return;
-          }
-
-          const text = await r.data.text();
-          const parsed = parseSquabbitCSV(text);
-
-          const ps = parsed.players || [];
-          setPlayers(ps);
-          setSelectedPlayer(ps[0]?.name || '');
-
-          setEventName(item.name);
-          setCoursePars({
-            men: parsed.parsMen || COURSE_DEFAULT_MEN,
-            women: parsed.parsWomen || parsed.parsMen || COURSE_DEFAULT_WOMEN
-          });
-          setCourseYards({
-            men: parsed.yardsMen || COURSE_YARDS_MEN,
-            women: parsed.yardsWomen || COURSE_YARDS_WOMEN
-          });
-          setCourseStrokeIndex({
-            men: parsed.strokeIndexMen || COURSE_STROKE_INDEX,
-            women: parsed.strokeIndexWomen || parsed.strokeIndexMen || COURSE_STROKE_INDEX
-          });
-
-          setView('event');
-          toast("Event loaded");
-        }
-
         // Load season table from Supabase
         async function fetchSeason(c) {
           c = c || client;
@@ -725,14 +672,15 @@
           setSeason(map);
         }
 
-        // Import CSV (local)
-        function importLocalCSV(text, filename) {
+        // Shared helper to load an event from CSV text
+        function loadEventFromText(text, nameForEvent) {
           const parsed = parseSquabbitCSV(text);
           const ps = parsed.players || [];
 
           setPlayers(ps);
           setSelectedPlayer(ps[0]?.name || "");
-          setEventName((filename || "").replace(/\.[^.]+$/, ""));
+
+          setEventName((nameForEvent || "").replace(/\.[^.]+$/, ""));
 
           setCoursePars({
             men: parsed.parsMen || COURSE_DEFAULT_MEN,
@@ -748,6 +696,29 @@
           });
 
           setView('event');
+        }
+
+        // Load event from Supabase
+        async function loadShared(item) {
+          if (!client) {
+            alert("Supabase client not ready");
+            return;
+          }
+
+          const r = await client.storage.from(BUCKET).download(item.path);
+          if (r.error) {
+            alert("Download failed: " + r.error.message);
+            return;
+          }
+
+          const text = await r.data.text();
+          loadEventFromText(text, item.name);
+          toast("Event loaded");
+        }
+
+        // Import CSV (local)
+        function importLocalCSV(text, filename) {
+          loadEventFromText(text, filename);
         }
 
         // Countback helper
@@ -788,42 +759,45 @@
 
           const base=[...rows].sort((a,b)=>(b.points-a.points)||compareByCountback(a,b));
 
-          const groups=[];
-          const used=new Set();
-
-          for(const r of base){
-            if(used.has(r.idx)) continue;
-            const grpIdxs=base.filter(x=>x.points===r.points).map(x=>x.idx);
-            grpIdxs.forEach(id=>used.add(id));
-            groups.push(grpIdxs);
+          // Group by points using a Map to avoid repeated filters
+          const byPoints = new Map();
+          for (const r of base) {
+            if (!byPoints.has(r.points)) byPoints.set(r.points, []);
+            byPoints.get(r.points).push(r);
           }
 
-          const topGroup = groups[0]?.map(i=>rows.find(r=>r.idx===i)) || [];
-          let best=topGroup.length? [topGroup[0]] : [];
-          for(let k=1;k<topGroup.length;k++){
+          // Insertion order follows sorted base (points descending)
+          const groups = Array.from(byPoints.values());
+
+          const topGroup = groups[0] || [];
+          let best = topGroup.length ? [topGroup[0]] : [];
+          for (let k=1;k<topGroup.length;k++){
             const cmp=compareByCountback(topGroup[k],best[0]);
             if(cmp>0) best=[topGroup[k]];
             else if(cmp===0) best.push(topGroup[k]);
           }
-          const winnerIdxSet=new Set(best.map(r=>r.idx));
+          const winnerSet = new Set(best);
 
           let pos=1;
           const out=[];
 
-          for(let gi=0; gi<groups.length; gi++){
-            const g=groups[gi];
-            const start=pos;
-            const ptsValue = POINTS_TABLE[start-1] || 0;
+          for(const group of groups){
+            const ptsValue = POINTS_TABLE[pos-1] || 0;
 
-            for(const i of g){
-              const r = rows.find(x=>x.idx===i);
-              const isWinner = winnerIdxSet.has(i) && gi===0;
+            for(const r of group){
+              const isWinner = winnerSet.has(r) && group === topGroup;
 
-              const hc = computeNewExactHandicap(r.startExact, r.gender, r.points, r.back9, isWinner);
+              const hc = computeNewExactHandicap(
+                r.startExact,
+                r.gender,
+                r.points,
+                r.back9,
+                isWinner
+              );
 
               out.push({
                 ...r,
-                position:start,
+                position:pos,
                 leaguePoints:ptsValue,
                 isWinner,
                 nextExact:hc.nextExact,
@@ -831,7 +805,7 @@
               });
             }
 
-            pos += g.length;
+            pos += group.length;
           }
 
           return out.sort((a,b)=>a.position-b.position);
@@ -877,7 +851,7 @@
 
           if (client) {
             const vals = Object.values(next).filter(r=>!isTeamLike(r.name));
-            const rows = vals.map(r => ({
+            const rowsToUpsert = vals.map(r => ({
               name:r.name,
               total_points:r.totalPoints,
               events:r.events,
@@ -887,13 +861,15 @@
               best_per_hole:r.bestPerHole
             }));
 
-            const res = await client.from(STANDINGS_TABLE).upsert(rows, { onConflict: 'name' });
+            const res = await client.from(STANDINGS_TABLE).upsert(rowsToUpsert, { onConflict: 'name' });
             if (res.error) toast("Error: " + res.error.message);
             else toast("Event added to season ✓");
           }
         }
 
         // Season: Remove event
+        // NOTE: This only reverses league points & event count.
+        // best_per_hole / eclectic / best_event / best_hole are not recomputed from history.
         async function removeEventFromSeason() {
           if (!computed.length) { toast("Load an event first"); return; }
           if (!window.confirm("Remove this event from the season standings?")) return;
@@ -924,7 +900,7 @@
             }
 
             const vals = Object.values(next).filter(r=>!isTeamLike(r.name));
-            const rows = vals.map(r => ({
+            const rowsToUpsert = vals.map(r => ({
               name:r.name,
               total_points:r.totalPoints,
               events:r.events,
@@ -936,7 +912,7 @@
 
             const res = await client
               .from(STANDINGS_TABLE)
-              .upsert(rows, { onConflict:'name' });
+              .upsert(rowsToUpsert, { onConflict:'name' });
 
             if (res.error) toast("Error: " + res.error.message);
             else toast("Event removed from season ✓");
