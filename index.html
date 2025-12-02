@@ -410,22 +410,43 @@
 
         const playerNameSet = new Set(players.map(p => p.name));
 
-        // --- Detect gender + specific tee from tee labels / card rows ---
+        // --- Tee string normalisation + matching ---
+        function normalizeTee(str) {
+          return String(str || '')
+            .toLowerCase()
+            // drop the word "tee"
+            .replace(/\btee\b/g, '')
+            // drop anything in parentheses (ratings, slope, idx)
+            .replace(/\([^)]*\)/g, '')
+            // collapse non-alphanumerics
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        }
+
         const genderMap = {};
         const playerTeeMap = {};
 
         function matchTeeName(label) {
-          if (!label) return null;
-          const lbl = label.trim().toLowerCase();
+          const lblNorm = normalizeTee(label);
+          if (!lblNorm) return null;
+
           let best = null;
           for (const tName of Object.keys(teesByName)) {
-            const tn = tName.toLowerCase();
-            if (lbl === tn) return tName;
-            if (lbl.includes(tn) || tn.includes(lbl)) best = tName;
+            const tnNorm = normalizeTee(tName);
+            if (!tnNorm) continue;
+
+            // exact normalized match
+            if (lblNorm === tnNorm) return tName;
+
+            // fallback: contains either way
+            if (lblNorm.includes(tnNorm) || tnNorm.includes(lblNorm)) {
+              best = tName;
+            }
           }
           return best;
         }
 
+        // --- Detect gender + specific tee from tee labels / card rows ---
         for (let r = 0; r < lines.length; r++) {
           const row = lines[r];
           if (!row) continue;
@@ -687,7 +708,6 @@
             return;
           }
 
-          // RELAXED FILTER: only ignore hidden dot-files, don't require .csv extension
           const data = (r.data || [])
             .filter(x => !x.name.startsWith('.'))
             .map(x => ({
@@ -1675,3 +1695,4 @@
     </script>
   </body>
 </html>
+
