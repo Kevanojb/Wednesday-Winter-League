@@ -1,7 +1,5 @@
 <!doctype html>
 <html lang="en">
- <!-- Umami Analytics (Wednesday Winter League) -->
-  <script defer src="https://cloud.umami.is/script.js" data-website-id="0e2a2d51-c64c-40b9-bd22-8682b408c2b9"></script> 
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -219,7 +217,7 @@
       }
 
       // -----------------------
-      // CourseLayout parser
+      // CourseLayout parser (multi-tee aware)
       // -----------------------
 
       function parseCourseLayout(lines) {
@@ -236,6 +234,10 @@
         let courseName = '';
         let men = null;
         let women = null;
+
+        const teesByName = {};
+        let defaultMenTeeName = '';
+        let defaultWomenTeeName = '';
 
         let i = startIdx + 1;
         while (i < lines.length) {
@@ -291,10 +293,22 @@
             const yards = holes.map(h => h.yards || 0);
             const siArr = holes.map(h => h.si || 0);
 
+            if (teeName) {
+              teesByName[teeName] = {
+                teeName,
+                gender,
+                pars,
+                yards,
+                si: siArr
+              };
+            }
+
             if (gender === 'F') {
               women = { pars, yards, si: siArr, teeName };
+              defaultWomenTeeName = teeName;
             } else {
               men = { pars, yards, si: siArr, teeName };
+              defaultMenTeeName = teeName;
             }
 
             i = j;
@@ -304,18 +318,21 @@
           i++;
         }
 
-        if (!men && !women) return null;
+        if (!men && !women && !Object.keys(teesByName).length) return null;
         if (!men && women) men = women;
         if (!women && men) women = men;
 
         return {
           courseName,
-          parsMen: men.pars,
-          yardsMen: men.yards,
-          strokeIndexMen: men.si,
-          parsWomen: women.pars,
-          yardsWomen: women.yards,
-          strokeIndexWomen: women.si
+          parsMen: men?.pars || [],
+          yardsMen: men?.yards || [],
+          strokeIndexMen: men?.si || [],
+          parsWomen: women?.pars || men?.pars || [],
+          yardsWomen: women?.yards || men?.yards || [],
+          strokeIndexWomen: women?.si || men?.si || [],
+          teesByName,
+          defaultMenTeeName,
+          defaultWomenTeeName
         };
       }
 
@@ -355,6 +372,10 @@
         // --- CourseLayout block (preferred) ---
         const layout = parseCourseLayout(lines);
 
+        const teesByName = layout?.teesByName || {};
+        const defaultMenTeeName = layout?.defaultMenTeeName || '';
+        const defaultWomenTeeName = layout?.defaultWomenTeeName || '';
+
         let parsMen   = layout?.parsMen   || parsedPars;
         let parsWomen = layout?.parsWomen || parsedPars;
         let yardsMen  = layout?.yardsMen  || COURSE_YARDS_MEN;
@@ -387,17 +408,49 @@
           }
         }
 
-        // --- Detect gender from tee labels ---
-        const genderMap={};
-        for(let r=0;r<lines.length;r++){
-          const row=lines[r];
-          if(!row) continue;
-          const nm=(row[0]||'').trim();
-          if(!nm) continue;
-          const tee=String(row[1]||'').toLowerCase();
-          if(/women|ladies|red tee/.test(tee)) genderMap[nm]='F';
-          else if(genderMap[nm]==null) genderMap[nm]='M';
+        const playerNameSet = new Set(players.map(p => p.name));
+
+        // --- Detect gender + specific tee from tee labels / card rows ---
+        const genderMap = {};
+        const playerTeeMap = {};
+
+        function matchTeeName(label) {
+          if (!label) return null;
+          const lbl = label.trim().toLowerCase();
+          let best = null;
+          for (const tName of Object.keys(teesByName)) {
+            const tn = tName.toLowerCase();
+            if (lbl === tn) return tName;
+            if (lbl.includes(tn) || tn.includes(lbl)) best = tName;
+          }
+          return best;
         }
+
+        for (let r = 0; r < lines.length; r++) {
+          const row = lines[r];
+          if (!row) continue;
+
+          const nm = (row[0] || '').trim();
+          if (!nm || !playerNameSet.has(nm)) continue;
+
+          const teeLabelRaw = (row[1] || '').trim();
+          const teeLower = teeLabelRaw.toLowerCase();
+
+          if (teeLabelRaw) {
+            const matchedTee = matchTeeName(teeLabelRaw);
+            if (matchedTee) {
+              playerTeeMap[nm] = matchedTee;
+              const teeCfg = teesByName[matchedTee];
+              if (teeCfg && teeCfg.gender) {
+                genderMap[nm] = teeCfg.gender;
+              }
+            }
+          }
+
+          if (/women|ladies|red tee/.test(teeLower)) genderMap[nm] = 'F';
+          else if (genderMap[nm] == null) genderMap[nm] = 'M';
+        }
+
         for(const p of players){
           if(genderMap[p.name]) p.gender = genderMap[p.name];
         }
@@ -494,9 +547,17 @@
           if(Number.isFinite(ptsSummary)) points = ptsSummary;
           else if(Number.isFinite(cardTotal)) points = cardTotal;
 
+          const gender = p.gender || genderMap[p.name] || 'M';
+
+          let teeName = playerTeeMap[p.name] || '';
+          if (!teeName) {
+            teeName = gender === 'F' ? defaultWomenTeeName : defaultMenTeeName;
+          }
+
           return {
             name:p.name,
-            gender:p.gender||genderMap[p.name]||'M',
+            gender,
+            teeName,
             handicap,
             points,
             back9:card.back9||0,
@@ -511,7 +572,8 @@
           yardsMen,
           yardsWomen,
           strokeIndexMen: strokeMen,
-          strokeIndexWomen: strokeWomen
+          strokeIndexWomen: strokeWomen,
+          teesByName
         };
       }
 
@@ -554,6 +616,8 @@
           men: COURSE_STROKE_INDEX,
           women: COURSE_STROKE_INDEX
         });
+
+        const [courseTees, setCourseTees] = useState({});
 
         const fileInputRef = useRef(null);
 
@@ -696,6 +760,7 @@
             men: parsed.strokeIndexMen || COURSE_STROKE_INDEX,
             women: parsed.strokeIndexWomen || parsed.strokeIndexMen || COURSE_STROKE_INDEX
           });
+          setCourseTees(parsed.teesByName || {});
 
           setView('event');
         }
@@ -753,6 +818,7 @@
             idx:i,
             name:p.name,
             gender:p.gender,
+            teeName:p.teeName,
             startExact:p.handicap,
             points:p.points,
             back9:p.back9,
@@ -761,14 +827,12 @@
 
           const base=[...rows].sort((a,b)=>(b.points-a.points)||compareByCountback(a,b));
 
-          // Group by points using a Map to avoid repeated filters
           const byPoints = new Map();
           for (const r of base) {
             if (!byPoints.has(r.points)) byPoints.set(r.points, []);
             byPoints.get(r.points).push(r);
           }
 
-          // Insertion order follows sorted base (points descending)
           const groups = Array.from(byPoints.values());
 
           const topGroup = groups[0] || [];
@@ -870,8 +934,6 @@
         }
 
         // Season: Remove event
-        // NOTE: This only reverses league points & event count.
-        // best_per_hole / eclectic / best_event / best_hole are not recomputed from history.
         async function removeEventFromSeason() {
           if (!computed.length) { toast("Load an event first"); return; }
           if (!window.confirm("Remove this event from the season standings?")) return;
@@ -1126,6 +1188,7 @@
                     <tr className="border-b border-squab-200 text-left">
                       <th>#</th>
                       <th>Name</th>
+                      <th>Tee</th>
                       <th>Handicap</th>
                       <th>Stableford</th>
                       <th>Back9</th>
@@ -1137,7 +1200,7 @@
                   <tbody className="[&_tr:nth-child(even)]:bg-squab-50">
                     {computed.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="py-3 text-neutral-600">
+                        <td colSpan="8" className="py-3 text-neutral-600">
                           Load an event to see results.
                         </td>
                       </tr>
@@ -1147,6 +1210,7 @@
                       <tr key={i} className="border-b border-squab-200">
                         <td>{r.position}</td>
                         <td className="whitespace-nowrap">{r.name}</td>
+                        <td className="whitespace-nowrap text-xs">{r.teeName || '—'}</td>
                         <td>{Math.round(r.startExact)}</td>
                         <td>{r.points}</td>
                         <td>{r.back9}</td>
@@ -1161,7 +1225,7 @@
           );
         }
 
-        function Ratings({ computed, coursePars, setView }) {
+        function Ratings({ computed, coursePars, courseTees, setView }) {
           const menPars = coursePars.men;
           const womenPars = coursePars.women;
 
@@ -1199,17 +1263,19 @@
 
           const ratings = useMemo(() => {
             return computed.map(r => {
-              const pars = r.gender === 'F' ? womenPars : menPars;
+              const teeCfg = r.teeName && courseTees[r.teeName] ? courseTees[r.teeName] : null;
+              const pars = teeCfg ? teeCfg.pars : (r.gender === 'F' ? womenPars : menPars);
               const av = eventParAverages(r.perHole, pars);
               return {
                 name: r.name,
+                teeName: r.teeName,
                 p3: to1(av.p3),
                 p4: to1(av.p4),
                 p5: to1(av.p5),
                 total: to1(av.p3 + av.p4 + av.p5)
               };
             }).sort((a,b)=>b.total-a.total);
-          }, [computed, menPars, womenPars]);
+          }, [computed, menPars, womenPars, courseTees]);
 
           return (
             <section className="rounded-2xl p-3 md:p-5 bg-white border border-squab-200 shadow-sm">
@@ -1222,6 +1288,7 @@
                   <thead>
                     <tr className="border-b border-squab-200 text-left">
                       <th>Name</th>
+                      <th>Tee</th>
                       <th>Par-3 Avg</th>
                       <th>Rating</th>
                       <th>Par-4 Avg</th>
@@ -1235,6 +1302,7 @@
                     {ratings.map(r => (
                       <tr key={r.name} className="border-b border-squab-200">
                         <td className="font-medium">{r.name}</td>
+                        <td className="text-xs whitespace-nowrap">{r.teeName || '—'}</td>
 
                         <td>{r.p3.toFixed(1)}</td>
                         <td>
@@ -1357,6 +1425,7 @@
           courseYards,
           strokeIndexMen,
           strokeIndexWomen,
+          courseTees,
           setView
         }) {
           if (!computed.length) {
@@ -1372,12 +1441,20 @@
           const player = computed.find((p) => p.name === selectedPlayer) || computed[0];
 
           const perHole = player.perHole || Array(18).fill(0);
-          const pars = coursePars[player.gender === "F" ? "women" : "men"];
-          const yards = courseYards[player.gender === "F" ? "women" : "men"];
+
+          const teeCfg = player.teeName && courseTees[player.teeName] ? courseTees[player.teeName] : null;
+
+          const pars = teeCfg
+            ? teeCfg.pars
+            : coursePars[player.gender === "F" ? "women" : "men"];
+
+          const yards = teeCfg
+            ? teeCfg.yards
+            : courseYards[player.gender === "F" ? "women" : "men"];
 
           const siMenArr = strokeIndexMen || [];
           const siWomenArr = strokeIndexWomen || siMenArr;
-          const siArr = player.gender === "F" ? siWomenArr : siMenArr;
+          const siArr = teeCfg ? teeCfg.si : (player.gender === "F" ? siWomenArr : siMenArr);
 
           // Field averages
           const fieldAvg = Array(18).fill(0);
@@ -1420,9 +1497,12 @@
             <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
               <EventNav setView={setView} />
 
-              <h2 className="text-lg font-semibold text-squab-900 mb-3">
+              <h2 className="text-lg font-semibold text-squab-900 mb-1">
                 Player Hole Analysis
               </h2>
+              <p className="text-xs text-neutral-600 mb-3">
+                {player.name} — {player.teeName || (player.gender === 'F' ? 'Women default tee' : 'Men default tee')}
+              </p>
 
               <div className="mb-4">
                 <label className="block text-sm font-medium mb-1">Select Player</label>
@@ -1553,6 +1633,7 @@
                 <Ratings
                   computed={computed}
                   coursePars={coursePars}
+                  courseTees={courseTees}
                   setView={setView}
                 />
               )}
@@ -1566,6 +1647,7 @@
                   courseYards={courseYards}
                   strokeIndexMen={courseStrokeIndex.men}
                   strokeIndexWomen={courseStrokeIndex.women}
+                  courseTees={courseTees}
                   setView={setView}
                 />
               )}
