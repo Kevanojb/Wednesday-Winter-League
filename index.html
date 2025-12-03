@@ -458,40 +458,62 @@
           }
         }
 
-        // --- Individual card per-hole extraction ---
-        const holeData={};
-        for(const p of players){
-          let found=false;
-          for(let i=0;i<lines.length-1;i++){
-            const row=lines[i];
-            if(!row) continue;
-            if((row[0]||'').trim()===p.name){
-              const stRow = lines[i+1] || [];
-              let stIndex=-1;
-              for(let j=0;j<stRow.length;j++){
-                if(String(stRow[j]).trim().toLowerCase()==='stableford'){ stIndex=j; break; }
+        // --- Individual card per-hole extraction (look-ahead for Stableford row) ---
+        const holeData = {};
+        for (const p of players) {
+          let found = false;
+
+          for (let i = 0; i < lines.length - 1; i++) {
+            const row = lines[i];
+            if (!row) continue;
+
+            if ((row[0] || '').trim() === p.name) {
+              // Look a few lines ahead for the Stableford row belonging to this player
+              let stRow = null;
+              let stIndex = -1;
+
+              for (let k = i + 1; k < Math.min(lines.length, i + 6); k++) {
+                const candidate = lines[k] || [];
+                const idx = candidate.findIndex(
+                  c => String(c).trim().toLowerCase() === 'stableford'
+                );
+                if (idx !== -1) {
+                  stRow = candidate;
+                  stIndex = idx;
+                  break;
+                }
               }
-              if(stIndex<0) continue;
 
-              const perHole=readStablefordPerHole(stRow);
-              const back9 = perHole.slice(9).reduce((a,b)=>a+(Number(b)||0),0);
-              const hcapCard = toNum(stRow[stIndex+1]);
+              if (!stRow || stIndex < 0) continue;
 
-              let totalFromCard=NaN;
-              for(let j=stRow.length-1;j>stIndex;j--){
-                const v=toNum(stRow[j]);
-                if(Number.isFinite(v)){ totalFromCard=v; break; }
+              const perHole = readStablefordPerHole(stRow) || Array(18).fill(0);
+              const back9 = perHole
+                .slice(9)
+                .reduce((a, b) => a + (Number(b) || 0), 0);
+
+              const hcapCard = toNum(stRow[stIndex + 1]);
+
+              let totalFromCard = NaN;
+              for (let j = stRow.length - 1; j > stIndex; j--) {
+                const v = toNum(stRow[j]);
+                if (Number.isFinite(v)) {
+                  totalFromCard = v;
+                  break;
+                }
               }
 
               holeData[p.name] = { perHole, back9, hcapCard, totalFromCard };
-              found=true;
+              found = true;
               break;
             }
           }
-          if(!found){
+
+          if (!found) {
             holeData[p.name] = {
-              perHole:Array(18).fill(0),
-              back9:0, hcapCard:NaN, totalFromCard:NaN
+              perHole: Array(18).fill(0),
+              back9: 0,
+              hcapCard: NaN,
+              totalFromCard: NaN
             };
           }
         }
