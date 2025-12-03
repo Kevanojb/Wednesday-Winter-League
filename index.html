@@ -171,7 +171,7 @@
       }
 
       // -----------------------
-      // CSV Parsing helpers (header-driven)
+      // CSV Parsing helpers
       // -----------------------
 
       const isTeamLike = name => {
@@ -191,13 +191,12 @@
         const d = raw.includes('\t') ? '\t' : (raw.includes(';') ? ';' : ',');
         return raw.split(d).map(s => (s||'').replace(/^"|"$/g,'').trim());
       }
-
       function toNum(x){
         const v=parseFloat(String(x == null ? '' : x).replace(/[^0-9.\-]/g,''));
         return Number.isFinite(v)?v:NaN;
       }
 
-      // Read per-hole Stableford for an individual card row that CONTAINS "Stableford"
+      // Read per-hole Stableford for an individual card
       function readStablefordPerHole(row){
         let start=-1;
         for(let i=0;i<row.length;i++){
@@ -218,7 +217,7 @@
       }
 
       // -----------------------
-      // CourseLayout parser (already header-based)
+      // CourseLayout parser
       // -----------------------
 
       function parseCourseLayout(lines) {
@@ -273,7 +272,6 @@
               const r = lines[j] || [];
               const first = (r[0] || '').trim().toLowerCase();
 
-              // stop when we hit a new tee / course / section, or blank line
               if (!first || first === 'tee' || first === 'course' || first === 'courselayout') break;
 
               const h = parseInt(r[0], 10);
@@ -320,7 +318,7 @@
       }
 
       // -----------------------
-      // Main Squabbit CSV parser (header-driven)
+      // Main Squabbit CSV parser
       // -----------------------
 
       function parseSquabbitCSV(text){
@@ -331,8 +329,7 @@
         let parsedPars=null;
         for(let i=0;i<lines.length;i++){
           const row=lines[i];
-          const k = (row[0]||'').trim().toLowerCase();
-          if(k==='par'){
+          if((row[0]||'').trim().toLowerCase()==='par'){
             const nums=[];
             for(let j=3;j<row.length;j++){
               const cell=String(row[j]||'').trim();
@@ -353,7 +350,7 @@
           parsedPars = COURSE_DEFAULT_MEN.slice();
         }
 
-        // --- CourseLayout block (preferred, header-based) ---
+        // --- CourseLayout block (preferred) ---
         const layout = parseCourseLayout(lines);
 
         let parsMen   = layout?.parsMen   || parsedPars;
@@ -363,15 +360,15 @@
         let strokeMen = layout?.strokeIndexMen || COURSE_STROKE_INDEX;
         let strokeWomen = layout?.strokeIndexWomen || strokeMen;
 
-        // --- Roster detection (header-based, order-agnostic) ---
+        // --- Roster detection (header-based, case-insensitive) ---
         let playerHeaderRow=-1;
         for(let i=0;i<lines.length;i++){
           const row = lines[i] || [];
-          const col0 = (row[0]||'').trim().toLowerCase();
-          const col1 = (row[1]||'').trim().toLowerCase();
+          const c0 = (row[0]||'').trim().toLowerCase();
+          const c1 = (row[1]||'').trim();
 
-          const isNameCol = (col0 === 'name' || col0 === 'player');
-          const isHcapCol = /^(hdcp|hcp|handicap|exact handicap)$/i.test(row[1]||'');
+          const isNameCol = (c0 === 'name' || c0 === 'player');
+          const isHcapCol = /^(hdcp|hcp|handicap|exact handicap)$/i.test(c1);
 
           if(isNameCol && isHcapCol){
             playerHeaderRow=i; break;
@@ -385,19 +382,17 @@
             const row=lines[i];
             if(!row) break;
             const name=(row[0]||'').trim();
-            if(!name) break;                // stop at blank line
-            if(isTeamLike(name)) continue;  // avoid "Team 1" etc
+            if(!name) break;
+            if(isTeamLike(name)) continue;
             if(/^player$/i.test(name)) continue;
-
-            const hRaw = (row[1]||'').trim();
-            const hcap = parseFloat(hRaw);
+            const hcap = parseFloat((row[1]||'').trim());
             if(!Number.isNaN(hcap)){
               players.push({ name, handicap:hcap, gender:'M' });
             }
           }
         }
 
-        // --- Detect gender from tee labels (order-agnostic) ---
+        // --- Detect gender from tee labels ---
         const genderMap={};
         for(let r=0;r<lines.length;r++){
           const row=lines[r];
@@ -413,9 +408,9 @@
         }
 
         // --- Summary stableford table (header-driven) ---
-        let totalsHeaderRow = -1;
+        let totalsStart=-1;
 
-        // Prefer: a row with "Stableford" in col0 and the NEXT row starting with "Player"
+        // Prefer: "Stableford" row followed by header row starting "Player"
         for(let i=0;i<lines.length-1;i++){
           const row = lines[i] || [];
           const first = (row[0]||'').trim().toLowerCase();
@@ -423,67 +418,47 @@
             const next = lines[i+1] || [];
             const h0 = (next[0]||'').trim().toLowerCase();
             if(h0==='player'){
-              totalsHeaderRow = i+1;
+              totalsStart=i;
               break;
             }
           }
         }
 
-        // Fallback: any row that starts with "Player" and has a "Total" column somewhere
-        if(totalsHeaderRow<0){
+        // Fallback: first "Stableford" row
+        if(totalsStart<0){
           for(let i=0;i<lines.length;i++){
             const row=lines[i]||[];
             const first=(row[0]||'').trim().toLowerCase();
-            if(first==='player'){
-              const hasTotal = row.some(c =>
-                String(c).trim().toLowerCase()==='total' ||
-                /points?\s*total/i.test(String(c))
-              );
-              if(hasTotal){
-                totalsHeaderRow = i;
-                break;
-              }
-            }
+            if(first==='stableford'){ totalsStart=i; break; }
           }
         }
 
         const totals={};
 
-        if(totalsHeaderRow>=0){
-          const header = lines[totalsHeaderRow] || [];
-
-          // find the TOTAL column index (last numeric-ish col if no explicit "Total")
-          let totalColIdx = header.findIndex(c =>
-            String(c).trim().toLowerCase()==='total' ||
-            /points?\s*total/i.test(String(c))
-          );
-          if(totalColIdx<0){
-            totalColIdx = header.length-1;
-          }
-
-          for(let i=totalsHeaderRow+1;i<lines.length;i++){
+        if(totalsStart>=0){
+          for(let i=totalsStart+2;i<lines.length;i++){
             const row=lines[i];
             if(!row) break;
-            const rawName=(row[0]||'').trim();
-            const name=rawName;
-
+            const name=(row[0]||'').trim();
             if(!name || name==='...' || /^round\s*\d+/i.test(name)) break;
-            if(/^player$/i.test(name)) continue;
+            if(/^(player)$/i.test(name)) continue;
             if(isTeamLike(name)) continue;
 
-            const v = toNum(row[totalColIdx]);
-            if(!Number.isFinite(v)) continue;
+            const numeric=[];
+            for(let j=1;j<row.length;j++){
+              const v=toNum(row[j]);
+              if(Number.isFinite(v)) numeric.push(v);
+            }
+            if(!numeric.length) continue;
+            totals[name] = numeric[numeric.length-1];
 
-            totals[name] = v;
-
-            // ensure these are in players list even if not on the roster table
             if(!players.some(p=>p.name===name)){
               players.push({ name, handicap:0, gender:genderMap[name]||'M' });
             }
           }
         }
 
-        // --- Individual card per-hole extraction (header-driven on player name + Stableford row) ---
+        // --- Individual card per-hole extraction ---
         const holeData={};
         for(const p of players){
           let found=false;
@@ -583,7 +558,7 @@
         const [statusMsg, setStatusMsg] = useState("Connecting…");
 
         const [shared, setShared] = useState([]);
-        the [sharedGroups, setSharedGroups] = useState([]);
+        const [sharedGroups, setSharedGroups] = useState([]);
 
         const [players, setPlayers] = useState([]);
         const [season, setSeason] = useState({});
