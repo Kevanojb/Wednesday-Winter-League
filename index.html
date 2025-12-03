@@ -2,17 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Wednesday Winter League — League & Eclectic</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Wednesday Winter League — Events & Eclectic</title>
     <link rel="icon" href="./favicon.ico" />
     <meta name="theme-color" content="#199f57" />
-    <meta property="og:title" content="Wednesday Winter League — League & Eclectic" />
+    <meta
+      property="og:title"
+      content="Wednesday Winter League — Events & Eclectic"
+    />
     <meta
       property="og:description"
       content="Winter League event results, ratings, standings, player hole analysis and eclectic leaderboard."
     />
 
-    <!-- Umami Analytics (optional, same as Den) -->
+    <!-- Umami Analytics -->
     <script
       defer
       src="https://cloud.umami.is/script.js"
@@ -47,14 +53,18 @@
 
     <!-- React + Babel + Supabase (UMD builds) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
+    ></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 
     <!-- Base styles -->
     <style>
       body {
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial;
       }
       .chip {
         padding: 0.3rem 0.65rem;
@@ -272,9 +282,15 @@
               continue;
             }
 
-            const colPar = header.findIndex((c) => String(c).trim().toLowerCase() === "par");
-            const colYards = header.findIndex((c) => String(c).trim().toLowerCase() === "yards");
-            const colSI = header.findIndex((c) => String(c).trim().toLowerCase() === "si");
+            const colPar = header.findIndex(
+              (c) => String(c).trim().toLowerCase() === "par"
+            );
+            const colYards = header.findIndex(
+              (c) => String(c).trim().toLowerCase() === "yards"
+            );
+            const colSI = header.findIndex(
+              (c) => String(c).trim().toLowerCase() === "si"
+            );
 
             if (colYards < 0 || colPar < 0 || colSI < 0) {
               i += 2;
@@ -295,7 +311,8 @@
               const r = lines[j] || [];
               const first = (r[0] || "").trim().toLowerCase();
 
-              if (!first || first === "tee" || first === "course" || first === "courselayout") break;
+              if (!first || first === "tee" || first === "course" || first === "courselayout")
+                break;
 
               const h = parseInt(r[0], 10);
               if (!Number.isFinite(h) || h < 1 || h > 18) break;
@@ -485,12 +502,12 @@
         let t = courseTees.find((tt) => (tt.gender || "M").toUpperCase() === gender);
         if (t) return t;
 
-        // 4) no match – no default tee here
+        // 4) no match – be strict, no default tee
         return null;
       }
 
       // -----------------------
-      // Main Squabbit CSV parser (Winter League uses same FINAL format)
+      // Main Squabbit CSV parser
       // -----------------------
 
       function parseSquabbitCSV(text) {
@@ -523,7 +540,7 @@
         const layoutRaw = parseCourseLayout(lines);
 
         if (!layoutRaw || !Array.isArray(layoutRaw.tees) || layoutRaw.tees.length === 0) {
-          throw new Error("No CourseLayout block found in CSV.");
+          throw new Error("No CourseLayout block found in CSV (Winter League).");
         }
 
         // Validate tees
@@ -676,7 +693,9 @@
               if (stIndex < 0) continue;
 
               const perHole = readStablefordPerHole(stRow);
-              const back9 = perHole.slice(9).reduce((a, b) => a + (Number(b) || 0), 0);
+              const back9 = perHole
+                .slice(9)
+                .reduce((a, b) => a + (Number(b) || 0), 0);
               const hcapCard = toNum(stRow[stIndex + 1]);
 
               let totalFromCard = NaN;
@@ -745,19 +764,19 @@
       }
 
       // ----------------------------------------------------
-      // App Component (Winter League, using Den logic)
+      // App Component (Winter League)
       // ----------------------------------------------------
       function App() {
         const [view, setView] = useState("home");
         const [selectedPlayer, setSelectedPlayer] = useState("");
 
-        // Supabase config (Winter League)
+        // Supabase config – Winter League
         const SUPA_URL = "https://mqknahdfpqxrpgpxqtus.supabase.co";
         const SUPA_KEY =
           "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
 
-        const BUCKET = "winter_league";              // ⬅️ changed from "den-events"
-        const STANDINGS_TABLE = "winter_league_standings"; // ⬅️ changed from "season_standings"
+        const BUCKET = "winter_league"; // ⬅ change if your bucket name differs
+        const STANDINGS_TABLE = "winter_league_standings"; // ⬅ change if your table differs
         const PREFIX = "events";
 
         const [client, setClient] = useState(null);
@@ -1187,7 +1206,7 @@
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <h1 className="text-xl md:text-2xl font-bold tracking-tight">
-                    Wednesday Winter League — League & Eclectic
+                    Wednesday Winter League — Events & Eclectic
                   </h1>
                   <p className="text-xs text-white/90">Supabase: {statusMsg}</p>
                   {courseName && (
@@ -1490,7 +1509,7 @@
             const sums = { 3: { s: 0, c: 0 }, 4: { s: 0, c: 0 }, 5: { s: 0, c: 0 } };
             for (let i = 0; i < 18; i++) {
               const par = pars[i];
-              if (!par || !sums[par]) continue;
+              if (!par || !sums[par]) continue; // no default par; skip if missing/invalid
 
               const pts = Number(perHole[i]) || 0;
               sums[par].s += pts;
