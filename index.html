@@ -1022,7 +1022,8 @@
             if (cmp > 0) {
               best = [topGroup[k]];
             } else if (cmp === 0) {
-              best.push(topGroup[k]];
+             best.push(topGroup[k]);
+
             }
           }
           const winnerIdxSet = new Set(best.map((r) => r.idx));
