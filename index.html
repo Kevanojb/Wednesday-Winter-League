@@ -191,6 +191,38 @@
         };
       }
 
+      // --- Shared Gross-Strokes Helpers (for Ratings & HoleAnalysis) ---
+
+      function playingHandicapFromExact(exact) {
+        return Math.max(0, Math.round(Number(exact) || 0));
+      }
+
+      // h = playing handicap, si = stroke index (1..18)
+      function strokesReceivedForHole(si, h) {
+        const s = Number(si) || 0;
+        const H = Number(h) || 0;
+        if (H <= 0 || s <= 0 || s > 18) return 0;
+
+        if (H < s && H <= 18) return 0;
+
+        if (H < s && H > 18) {
+          // with H>18, everyone gets at least 1 shot per hole, but we still use general formula below
+        }
+
+        if (H < s) return 0;
+
+        // shots = 1 + floor((H - si)/18) when H >= si
+        return 1 + Math.floor((H - s) / 18);
+      }
+
+      // Stableford → NET strokes vs par (handicap still applied)
+      function netVsParFromPoints(pts) {
+        const p = Number(pts) || 0;
+        if (p <= 0) return 2; // treat 0 pts as net double (or worse) over par
+        // 1pt = +1, 2pt = 0, 3pt = -1, 4pt = -2, etc.
+        return 2 - p;
+      }
+
       // -----------------------
       // CSV Parsing helpers
       // -----------------------
@@ -262,7 +294,7 @@
             i++;
             continue;
           }
-          if (key === "courselayout") break; // next block
+          if (key === "courselayout") break;
 
           if (key === "course") {
             courseName = (row[1] || "").trim() || courseName;
@@ -1479,13 +1511,12 @@
           );
         }
 
-        // --- UPDATED Ratings: strokes vs par (derived from Stableford) ---
+        // --- UPDATED Ratings: gross-based strokes vs par ---
         function Ratings({ computed, courseTees, setView }) {
-          // avg is strokes relative to par (negative = better)
           const ratingLabel = (avg) =>
-            avg <= -0.5
+            avg <= -0.75
               ? "On Fire"
-              : avg <= 0
+              : avg <= -0.25
               ? "Under Par"
               : avg <= 0.5
               ? "Solid"
@@ -1494,51 +1525,13 @@
               : "Struggle";
 
           const badgeClass = (avg) =>
-            avg <= 0
+            avg <= -0.25
               ? "bg-emerald-100 text-emerald-800"
               : avg <= 0.5
               ? "bg-emerald-50 text-emerald-700"
               : avg <= 1
               ? "bg-amber-100 text-amber-800"
               : "bg-red-100 text-red-800";
-
-          // Convert Stableford → strokes vs par for each par bucket
-          // perHole = Stableford points array (0–6), pars = tee.pars (per hole par)
-          const eventParOverPar = (perHole, pars) => {
-            const sums = {
-              3: { s: 0, c: 0 },
-              4: { s: 0, c: 0 },
-              5: { s: 0, c: 0 }
-            };
-
-            for (let i = 0; i < 18; i++) {
-              const par = pars[i];
-              if (!par || !sums[par]) continue;
-
-              const pts = Number(perHole[i]) || 0;
-
-              // Stableford → strokes relative to par (net)
-              // P <= 0 → +2 over par (blow up)
-              // P >= 1 → rel = 2 - P  (2pts = 0, 3pts = -1, 1pt = +1, 4pts = -2, etc)
-              let rel;
-              if (pts <= 0) {
-                rel = 2;
-              } else {
-                rel = 2 - pts;
-              }
-
-              sums[par].s += rel;
-              sums[par].c++;
-            }
-
-            const avg = (t) => (sums[t].c ? sums[t].s / sums[t].c : 0);
-
-            return {
-              p3: avg(3),
-              p4: avg(4),
-              p5: avg(5)
-            };
-          };
 
           const fmt = (v) => (v > 0 ? "+" : "") + v.toFixed(1);
 
@@ -1556,18 +1549,43 @@
                   };
                 }
 
-                const overPar = eventParOverPar(r.perHole, tee.pars);
+                const pars = tee.pars || [];
+                const sis = tee.si || [];
+                const perHole = r.perHole || Array(18).fill(0);
+                const hcap = playingHandicapFromExact(r.startExact);
+
+                const par3 = [];
+                const par4 = [];
+                const par5 = [];
+
+                for (let i = 0; i < 18; i++) {
+                  const par = pars[i];
+                  const pts = perHole[i] || 0;
+                  const netRel = netVsParFromPoints(pts); // net vs par
+                  const shots = strokesReceivedForHole(sis[i], hcap);
+                  const grossRel = netRel + shots; // gross vs par
+
+                  if (par === 3) par3.push(grossRel);
+                  if (par === 4) par4.push(grossRel);
+                  if (par === 5) par5.push(grossRel);
+                }
+
+                const avg = (arr) =>
+                  arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+                const p3 = avg(par3);
+                const p4 = avg(par4);
+                const p5 = avg(par5);
 
                 return {
                   name: r.name,
-                  p3: to1(overPar.p3),
-                  p4: to1(overPar.p4),
-                  p5: to1(overPar.p5),
-                  // total strokes vs par across all par types (lower is better)
-                  total: to1(overPar.p3 + overPar.p4 + overPar.p5)
+                  p3: to1(p3),
+                  p4: to1(p4),
+                  p5: to1(p5),
+                  total: to1(p3 + p4 + p5)
                 };
               })
-              // sort by strokes vs par (ascending = best)
+              // lower total (strokes over par) is better
               .sort((a, b) => a.total - b.total);
           }, [computed, courseTees]);
 
@@ -1576,7 +1594,7 @@
               <EventNav setView={setView} />
 
               <h2 className="text-lg font-semibold text-squab-900 mb-3">
-                Player Ratings (Strokes vs Par)
+                Player Ratings (Gross Strokes vs Par)
               </h2>
 
               <div className="overflow-auto">
@@ -1732,7 +1750,7 @@
           );
         }
 
-        // --- UPDATED HoleAnalysis: strokes vs par & strokes gained vs field ---
+        // --- UPDATED HoleAnalysis: gross-based strokes vs par & strokes gained vs field ---
         function HoleAnalysis({
           computed,
           selectedPlayer,
@@ -1772,28 +1790,33 @@
           const pars = tee.pars;
           const yards = tee.yards;
           const siArr = tee.si;
+          const playingHcap = playingHandicapFromExact(player.startExact);
 
-          // Convert Stableford → net strokes vs par:
-          // pts <= 0 → +2 over par (generic blow-up)
-          // pts >= 1 → 2 - pts (2pts = 0, 3pts = -1, 1pt = +1, 4pts = -2, etc)
-          const toRelStrokes = (pts) => {
-            const p = Number(pts) || 0;
-            if (p <= 0) return 2;
-            return 2 - p;
-          };
+          // Player gross vs par per hole
+          const grossRelPlayer = perHole.map((pts, i) => {
+            const netRel = netVsParFromPoints(pts);
+            const shots = strokesReceivedForHole(siArr[i], playingHcap);
+            return netRel + shots;
+          });
 
-          const relPlayer = perHole.map((pts) => toRelStrokes(pts));
-
-          const fieldRel = Array(18).fill(0);
+          // Field average gross vs par per hole
+          const fieldGrossRel = Array(18).fill(0);
           for (let h = 0; h < 18; h++) {
-            const vals = computed.map((p) =>
-              toRelStrokes(p.perHole ? p.perHole[h] : 0)
-            );
-            fieldRel[h] = vals.reduce((a, b) => a + b, 0) / vals.length;
+            const vals = computed.map((p) => {
+              const ph = p.perHole || Array(18).fill(0);
+              const pts = ph[h] || 0;
+              const teeP = chooseTeeForPlayer(p, courseTees) || tee;
+              const siP = (teeP.si || [])[h] || siArr[h];
+              const hcapP = playingHandicapFromExact(p.startExact);
+              const netRel = netVsParFromPoints(pts);
+              const shots = strokesReceivedForHole(siP, hcapP);
+              return netRel + shots;
+            });
+            fieldGrossRel[h] = vals.reduce((a, b) => a + b, 0) / vals.length;
           }
 
-          // Strokes gained vs field: positive = better than field
-          const gains = relPlayer.map((rp, i) => fieldRel[i] - rp);
+          // Strokes gained vs field (gross)
+          const gains = grossRelPlayer.map((gp, i) => fieldGrossRel[i] - gp);
           const totalGain = gains.reduce((a, b) => a + b, 0);
 
           const bestHole = gains
@@ -1804,14 +1827,14 @@
             .map((g, i) => ({ hole: i + 1, g }))
             .sort((a, b) => a.g - b.g)[0];
 
-          // Par-type averages (strokes vs par)
+          // Par-type averages (gross vs par)
           const par3 = [],
             par4 = [],
             par5 = [];
           for (let i = 0; i < 18; i++) {
-            if (pars[i] === 3) par3.push(relPlayer[i]);
-            if (pars[i] === 4) par4.push(relPlayer[i]);
-            if (pars[i] === 5) par5.push(relPlayer[i]);
+            if (pars[i] === 3) par3.push(grossRelPlayer[i]);
+            if (pars[i] === 4) par4.push(grossRelPlayer[i]);
+            if (pars[i] === 5) par5.push(grossRelPlayer[i]);
           }
           const avgP3 = par3.reduce((a, b) => a + b, 0) / (par3.length || 1);
           const avgP4 = par4.reduce((a, b) => a + b, 0) / (par4.length || 1);
@@ -1836,13 +1859,16 @@
               <EventNav setView={setView} />
 
               <h2 className="text-lg font-semibold text-squab-900 mb-1">
-                Player Hole Analysis (Strokes)
+                Player Hole Analysis (Gross-based)
               </h2>
               <p className="text-xs text-neutral-600 mb-3">
                 Tee for this player:{" "}
                 <span className="font-semibold">
                   {player.teeLabel || tee.teeName || "Unknown"}
                 </span>
+                {" · "}
+                Playing handicap (approx):{" "}
+                <span className="font-semibold">{playingHcap}</span>
               </p>
 
               <div className="mb-4">
@@ -1863,7 +1889,7 @@
               <div className="grid md:grid-cols-3 gap-4 mb-5">
                 <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
                   <div className="text-xs text-neutral-600">
-                    Total Gain vs Field (strokes)
+                    Total Strokes Gained vs Field (gross)
                   </div>
                   <div className="text-xl font-bold">{fmtSigned(totalGain)}</div>
                 </div>
@@ -1887,7 +1913,7 @@
               <div className="grid md:grid-cols-3 gap-4 mb-6">
                 <div className="p-3 bg-white border border-squab-200 rounded-xl">
                   <div className="text-xs text-neutral-600">
-                    Avg Par-3 vs Par (strokes)
+                    Avg Par-3 vs Par (gross)
                   </div>
                   <div className="text-xl font-semibold">
                     {fmtSigned(avgP3)}
@@ -1895,7 +1921,7 @@
                 </div>
                 <div className="p-3 bg-white border border-squab-200 rounded-xl">
                   <div className="text-xs text-neutral-600">
-                    Avg Par-4 vs Par (strokes)
+                    Avg Par-4 vs Par (gross)
                   </div>
                   <div className="text-xl font-semibold">
                     {fmtSigned(avgP4)}
@@ -1903,7 +1929,7 @@
                 </div>
                 <div className="p-3 bg-white border border-squab-200 rounded-xl">
                   <div className="text-xs text-neutral-600">
-                    Avg Par-5 vs Par (strokes)
+                    Avg Par-5 vs Par (gross)
                   </div>
                   <div className="text-xl font-semibold">
                     {fmtSigned(avgP5)}
@@ -1920,8 +1946,8 @@
                       <th>Yards</th>
                       <th>SI</th>
                       <th>Pts (Stableford)</th>
-                      <th>Net vs Par (strokes)</th>
-                      <th>Field Avg (strokes)</th>
+                      <th>Gross vs Par (strokes)</th>
+                      <th>Field Avg (gross)</th>
                       <th>Gain (strokes)</th>
                       <th>Type</th>
                     </tr>
@@ -1935,8 +1961,8 @@
                         <td>{yards[i] > 0 ? yards[i] : "—"}</td>
                         <td>{siArr[i] > 0 ? siArr[i] : "—"}</td>
                         <td className="font-semibold">{pts}</td>
-                        <td>{fmtSigned(relPlayer[i])}</td>
-                        <td>{fmtSigned(fieldRel[i])}</td>
+                        <td>{fmtSigned(grossRelPlayer[i])}</td>
+                        <td>{fmtSigned(fieldGrossRel[i])}</td>
                         <td
                           className={
                             gains[i] >= 0
