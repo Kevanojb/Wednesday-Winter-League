@@ -487,7 +487,9 @@
 
         // 1) exact tee name match
         if (label) {
-          let t = courseTees.find((tt) => (tt.teeName || "").toLowerCase() === label);
+          let t = courseTees.find(
+            (tt) => (tt.teeName || "").toLowerCase() === label
+          );
           if (t) return t;
 
           // 2) fuzzy contains match
@@ -499,7 +501,9 @@
         }
 
         // 3) match by gender
-        let t = courseTees.find((tt) => (tt.gender || "M").toUpperCase() === gender);
+        let t = courseTees.find(
+          (tt) => (tt.gender || "M").toUpperCase() === gender
+        );
         if (t) return t;
 
         // 4) no match – be strict, no default tee
@@ -775,8 +779,8 @@
         const SUPA_KEY =
           "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa25haGRmcHF4cnBncHhxdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTU3MDYsImV4cCI6MjA3ODAzMTcwNn0.GTUVsrRJ-MClMg96vuHZpUtAnUFtCsJvuLiiE0D-fCc";
 
-        const BUCKET = "winter_league"; // ⬅ change if your bucket name differs
-        const STANDINGS_TABLE = "winter_league_standings"; // ⬅ change if your table differs
+        const BUCKET = "winter_league";
+        const STANDINGS_TABLE = "winter_league_standings";
         const PREFIX = "events";
 
         const [client, setClient] = useState(null);
@@ -910,7 +914,6 @@
             .select(
               "name,total_points,events,best_event_points,best_hole_points,eclectic_total,best_per_hole"
             );
-
           if (r.error) {
             setStatusMsg("Error: " + r.error.message);
             return;
@@ -1015,15 +1018,15 @@
             groups.push(grpIdxs);
           }
 
-          const topGroup = groups[0]?.map((i) => rows.find((r) => r.idx === i)) || [];
+          const topGroup =
+            groups[0]?.map((i) => rows.find((r) => r.idx === i)) || [];
           let best = topGroup.length ? [topGroup[0]] : [];
           for (let k = 1; k < topGroup.length; k++) {
             const cmp = compareByCountback(topGroup[k], best[0]);
             if (cmp > 0) {
               best = [topGroup[k]];
             } else if (cmp === 0) {
-             best.push(topGroup[k]);
-
+              best.push(topGroup[k]);
             }
           }
           const winnerIdxSet = new Set(best.map((r) => r.idx));
@@ -1136,7 +1139,8 @@
             toast("Load an event first");
             return;
           }
-          if (!window.confirm("Remove this event from the season standings?")) return;
+          if (!window.confirm("Remove this event from the season standings?"))
+            return;
 
           const next = { ...season };
           const oldSeason = season;
@@ -1156,7 +1160,6 @@
           }
 
           setSeason(next);
-
           if (client) {
             const removedNames = Object.keys(oldSeason).filter((k) => !next[k]);
             if (removedNames.length) {
@@ -1177,7 +1180,6 @@
             const res = await client
               .from(STANDINGS_TABLE)
               .upsert(rows, { onConflict: "name" });
-
             if (res.error) toast("Error: " + res.error.message);
             else toast("Event removed from season ✓");
           }
@@ -1211,7 +1213,9 @@
                   </h1>
                   <p className="text-xs text-white/90">Supabase: {statusMsg}</p>
                   {courseName && (
-                    <p className="text-xs text-white/80 mt-1">Course: {courseName}</p>
+                    <p className="text-xs text-white/80 mt-1">
+                      Course: {courseName}
+                    </p>
                   )}
                 </div>
                 <span className="hidden sm:inline-flex chip border-white/30 bg-white/10 text-white">
@@ -1267,9 +1271,7 @@
               >
                 <span className="font-semibold">Menu</span>
                 <span
-                  className={`transition-transform ${
-                    open ? "rotate-180" : ""
-                  }`}
+                  className={`transition-transform ${open ? "rotate-180" : ""}`}
                 >
                   ▾
                 </span>
@@ -1450,20 +1452,14 @@
                   <tbody className="[&_tr:nth-child(even)]:bg-squab-50">
                     {computed.length === 0 && (
                       <tr>
-                        <td
-                          colSpan="8"
-                          className="py-3 text-neutral-600"
-                        >
+                        <td colSpan="8" className="py-3 text-neutral-600">
                           Load an event to see results.
                         </td>
                       </tr>
                     )}
 
                     {computed.map((r, i) => (
-                      <tr
-                        key={i}
-                        className="border-b border-squab-200"
-                      >
+                      <tr key={i} className="border-b border-squab-200">
                         <td>{r.position}</td>
                         <td className="whitespace-nowrap">{r.name}</td>
                         <td className="whitespace-nowrap text-xs">
@@ -1483,46 +1479,68 @@
           );
         }
 
+        // --- UPDATED Ratings: strokes vs par (derived from Stableford) ---
         function Ratings({ computed, courseTees, setView }) {
+          // avg is strokes relative to par (negative = better)
           const ratingLabel = (avg) =>
-            avg >= 3
-              ? "Excellent"
-              : avg >= 2.5
-              ? "Good"
-              : avg >= 2
+            avg <= -0.5
+              ? "On Fire"
+              : avg <= 0
+              ? "Under Par"
+              : avg <= 0.5
               ? "Solid"
-              : avg >= 1.5
+              : avg <= 1
               ? "Needs Work"
               : "Struggle";
 
           const badgeClass = (avg) =>
-            avg >= 3
+            avg <= 0
               ? "bg-emerald-100 text-emerald-800"
-              : avg >= 2.5
+              : avg <= 0.5
               ? "bg-emerald-50 text-emerald-700"
-              : avg >= 2
-              ? "bg-neutral-100 text-neutral-800"
-              : avg >= 1.5
+              : avg <= 1
               ? "bg-amber-100 text-amber-800"
               : "bg-red-100 text-red-800";
 
-          const eventParAverages = (perHole, pars) => {
-            const sums = { 3: { s: 0, c: 0 }, 4: { s: 0, c: 0 }, 5: { s: 0, c: 0 } };
+          // Convert Stableford → strokes vs par for each par bucket
+          // perHole = Stableford points array (0–6), pars = tee.pars (per hole par)
+          const eventParOverPar = (perHole, pars) => {
+            const sums = {
+              3: { s: 0, c: 0 },
+              4: { s: 0, c: 0 },
+              5: { s: 0, c: 0 }
+            };
+
             for (let i = 0; i < 18; i++) {
               const par = pars[i];
-              if (!par || !sums[par]) continue; // no default par; skip if missing/invalid
+              if (!par || !sums[par]) continue;
 
               const pts = Number(perHole[i]) || 0;
-              sums[par].s += pts;
+
+              // Stableford → strokes relative to par (net)
+              // P <= 0 → +2 over par (blow up)
+              // P >= 1 → rel = 2 - P  (2pts = 0, 3pts = -1, 1pt = +1, 4pts = -2, etc)
+              let rel;
+              if (pts <= 0) {
+                rel = 2;
+              } else {
+                rel = 2 - pts;
+              }
+
+              sums[par].s += rel;
               sums[par].c++;
             }
+
             const avg = (t) => (sums[t].c ? sums[t].s / sums[t].c : 0);
+
             return {
               p3: avg(3),
               p4: avg(4),
               p5: avg(5)
             };
           };
+
+          const fmt = (v) => (v > 0 ? "+" : "") + v.toFixed(1);
 
           const ratings = useMemo(() => {
             return computed
@@ -1537,16 +1555,20 @@
                     total: 0
                   };
                 }
-                const av = eventParAverages(r.perHole, tee.pars);
+
+                const overPar = eventParOverPar(r.perHole, tee.pars);
+
                 return {
                   name: r.name,
-                  p3: to1(av.p3),
-                  p4: to1(av.p4),
-                  p5: to1(av.p5),
-                  total: to1(av.p3 + av.p4 + av.p5)
+                  p3: to1(overPar.p3),
+                  p4: to1(overPar.p4),
+                  p5: to1(overPar.p5),
+                  // total strokes vs par across all par types (lower is better)
+                  total: to1(overPar.p3 + overPar.p4 + overPar.p5)
                 };
               })
-              .sort((a, b) => b.total - a.total);
+              // sort by strokes vs par (ascending = best)
+              .sort((a, b) => a.total - b.total);
           }, [computed, courseTees]);
 
           return (
@@ -1554,7 +1576,7 @@
               <EventNav setView={setView} />
 
               <h2 className="text-lg font-semibold text-squab-900 mb-3">
-                Player Ratings
+                Player Ratings (Strokes vs Par)
               </h2>
 
               <div className="overflow-auto">
@@ -1562,24 +1584,21 @@
                   <thead>
                     <tr className="border-b border-squab-200 text-left">
                       <th>Name</th>
-                      <th>Par-3 Avg</th>
+                      <th>Par-3 Avg (Δ Strokes)</th>
                       <th>Rating</th>
-                      <th>Par-4 Avg</th>
+                      <th>Par-4 Avg (Δ Strokes)</th>
                       <th>Rating</th>
-                      <th>Par-5 Avg</th>
+                      <th>Par-5 Avg (Δ Strokes)</th>
                       <th>Rating</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {ratings.map((r) => (
-                      <tr
-                        key={r.name}
-                        className="border-b border-squab-200"
-                      >
+                      <tr key={r.name} className="border-b border-squab-200">
                         <td className="font-medium">{r.name}</td>
 
-                        <td>{r.p3.toFixed(1)}</td>
+                        <td>{fmt(r.p3)}</td>
                         <td>
                           <span
                             className={`px-2 py-0.5 rounded-lg text-xs ${badgeClass(
@@ -1590,7 +1609,7 @@
                           </span>
                         </td>
 
-                        <td>{r.p4.toFixed(1)}</td>
+                        <td>{fmt(r.p4)}</td>
                         <td>
                           <span
                             className={`px-2 py-0.5 rounded-lg text-xs ${badgeClass(
@@ -1601,7 +1620,7 @@
                           </span>
                         </td>
 
-                        <td>{r.p5.toFixed(1)}</td>
+                        <td>{fmt(r.p5)}</td>
                         <td>
                           <span
                             className={`px-2 py-0.5 rounded-lg text-xs ${badgeClass(
@@ -1652,10 +1671,7 @@
 
                   <tbody>
                     {list.map((r, i) => (
-                      <tr
-                        key={r.name}
-                        className="border-b border-squab-200"
-                      >
+                      <tr key={r.name} className="border-b border-squab-200">
                         <td>{i + 1}</td>
                         <td>{r.name}</td>
                         <td>{r.events}</td>
@@ -1700,10 +1716,7 @@
 
                   <tbody>
                     {list.map((r, i) => (
-                      <tr
-                        key={r.name}
-                        className="border-b border-squab-200"
-                      >
+                      <tr key={r.name} className="border-b border-squab-200">
                         <td>{i + 1}</td>
                         <td>{r.name}</td>
                         <td>{r.eclecticTotal}</td>
@@ -1719,6 +1732,7 @@
           );
         }
 
+        // --- UPDATED HoleAnalysis: strokes vs par & strokes gained vs field ---
         function HoleAnalysis({
           computed,
           selectedPlayer,
@@ -1747,8 +1761,8 @@
               <section className="rounded-2xl p-4 bg-white border border-squab-200 shadow-sm">
                 <EventNav setView={setView} />
                 <p className="text-neutral-600">
-                  No tee layout found in CourseLayout for this player. Check the
-                  CSV tee names and player tee labels.
+                  No tee layout found in CourseLayout for this player. Check the CSV
+                  tee names and player tee labels.
                 </p>
               </section>
             );
@@ -1759,13 +1773,27 @@
           const yards = tee.yards;
           const siArr = tee.si;
 
-          const fieldAvg = Array(18).fill(0);
+          // Convert Stableford → net strokes vs par:
+          // pts <= 0 → +2 over par (generic blow-up)
+          // pts >= 1 → 2 - pts (2pts = 0, 3pts = -1, 1pt = +1, 4pts = -2, etc)
+          const toRelStrokes = (pts) => {
+            const p = Number(pts) || 0;
+            if (p <= 0) return 2;
+            return 2 - p;
+          };
+
+          const relPlayer = perHole.map((pts) => toRelStrokes(pts));
+
+          const fieldRel = Array(18).fill(0);
           for (let h = 0; h < 18; h++) {
-            const vals = computed.map((p) => Number(p.perHole[h]) || 0);
-            fieldAvg[h] = vals.reduce((a, b) => a + b, 0) / vals.length;
+            const vals = computed.map((p) =>
+              toRelStrokes(p.perHole ? p.perHole[h] : 0)
+            );
+            fieldRel[h] = vals.reduce((a, b) => a + b, 0) / vals.length;
           }
 
-          const gains = perHole.map((p, i) => p - fieldAvg[i]);
+          // Strokes gained vs field: positive = better than field
+          const gains = relPlayer.map((rp, i) => fieldRel[i] - rp);
           const totalGain = gains.reduce((a, b) => a + b, 0);
 
           const bestHole = gains
@@ -1776,20 +1804,18 @@
             .map((g, i) => ({ hole: i + 1, g }))
             .sort((a, b) => a.g - b.g)[0];
 
+          // Par-type averages (strokes vs par)
           const par3 = [],
             par4 = [],
             par5 = [];
           for (let i = 0; i < 18; i++) {
-            if (pars[i] === 3) par3.push(perHole[i]);
-            if (pars[i] === 4) par4.push(perHole[i]);
-            if (pars[i] === 5) par5.push(perHole[i]);
+            if (pars[i] === 3) par3.push(relPlayer[i]);
+            if (pars[i] === 4) par4.push(relPlayer[i]);
+            if (pars[i] === 5) par5.push(relPlayer[i]);
           }
-          const avgP3 =
-            par3.reduce((a, b) => a + b, 0) / (par3.length || 1);
-          const avgP4 =
-            par4.reduce((a, b) => a + b, 0) / (par4.length || 1);
-          const avgP5 =
-            par5.reduce((a, b) => a + b, 0) / (par5.length || 1);
+          const avgP3 = par3.reduce((a, b) => a + b, 0) / (par3.length || 1);
+          const avgP4 = par4.reduce((a, b) => a + b, 0) / (par4.length || 1);
+          const avgP5 = par5.reduce((a, b) => a + b, 0) / (par5.length || 1);
 
           const holeType = (h) => {
             const par = pars[h];
@@ -1803,12 +1829,14 @@
             return "Unknown";
           };
 
+          const fmtSigned = (v) => (v > 0 ? "+" : "") + to1(v);
+
           return (
             <section className="rounded-2xl p-4 md:p-6 bg-white border border-squab-200 shadow-sm">
               <EventNav setView={setView} />
 
               <h2 className="text-lg font-semibold text-squab-900 mb-1">
-                Player Hole Analysis
+                Player Hole Analysis (Strokes)
               </h2>
               <p className="text-xs text-neutral-600 mb-3">
                 Tee for this player:{" "}
@@ -1835,22 +1863,23 @@
               <div className="grid md:grid-cols-3 gap-4 mb-5">
                 <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
                   <div className="text-xs text-neutral-600">
-                    Total Gain vs Field
+                    Total Gain vs Field (strokes)
                   </div>
-                  <div className="text-xl font-bold">{to1(totalGain)}</div>
+                  <div className="text-xl font-bold">{fmtSigned(totalGain)}</div>
                 </div>
 
                 <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
                   <div className="text-xs text-neutral-600">Best Hole</div>
-                  <div className="text-xl font-bold">
-                    Hole {bestHole.hole} ({to1(bestHole.g)} pts vs field)
+                  <div className="text-sm md:text-xl font-bold">
+                    Hole {bestHole.hole} ({fmtSigned(bestHole.g)} strokes vs field)
                   </div>
                 </div>
 
                 <div className="p-3 border border-squab-200 rounded-xl bg-squab-50">
                   <div className="text-xs text-neutral-600">Worst Hole</div>
-                  <div className="text-xl font-bold">
-                    Hole {worstHole.hole} ({to1(worstHole.g)} pts vs field)
+                  <div className="text-sm md:text-xl font-bold">
+                    Hole {worstHole.hole} ({fmtSigned(worstHole.g)} strokes vs
+                    field)
                   </div>
                 </div>
               </div>
@@ -1858,26 +1887,26 @@
               <div className="grid md:grid-cols-3 gap-4 mb-6">
                 <div className="p-3 bg-white border border-squab-200 rounded-xl">
                   <div className="text-xs text-neutral-600">
-                    Avg Par-3 Score
+                    Avg Par-3 vs Par (strokes)
                   </div>
                   <div className="text-xl font-semibold">
-                    {to1(avgP3)}
+                    {fmtSigned(avgP3)}
                   </div>
                 </div>
                 <div className="p-3 bg-white border border-squab-200 rounded-xl">
                   <div className="text-xs text-neutral-600">
-                    Avg Par-4 Score
+                    Avg Par-4 vs Par (strokes)
                   </div>
                   <div className="text-xl font-semibold">
-                    {to1(avgP4)}
+                    {fmtSigned(avgP4)}
                   </div>
                 </div>
                 <div className="p-3 bg-white border border-squab-200 rounded-xl">
                   <div className="text-xs text-neutral-600">
-                    Avg Par-5 Score
+                    Avg Par-5 vs Par (strokes)
                   </div>
                   <div className="text-xl font-semibold">
-                    {to1(avgP5)}
+                    {fmtSigned(avgP5)}
                   </div>
                 </div>
               </div>
@@ -1890,9 +1919,10 @@
                       <th>Par</th>
                       <th>Yards</th>
                       <th>SI</th>
-                      <th>Pts</th>
-                      <th>Field Avg</th>
-                      <th>Gain</th>
+                      <th>Pts (Stableford)</th>
+                      <th>Net vs Par (strokes)</th>
+                      <th>Field Avg (strokes)</th>
+                      <th>Gain (strokes)</th>
                       <th>Type</th>
                     </tr>
                   </thead>
@@ -1905,7 +1935,8 @@
                         <td>{yards[i] > 0 ? yards[i] : "—"}</td>
                         <td>{siArr[i] > 0 ? siArr[i] : "—"}</td>
                         <td className="font-semibold">{pts}</td>
-                        <td>{to1(fieldAvg[i])}</td>
+                        <td>{fmtSigned(relPlayer[i])}</td>
+                        <td>{fmtSigned(fieldRel[i])}</td>
                         <td
                           className={
                             gains[i] >= 0
@@ -1913,7 +1944,7 @@
                               : "text-red-600 font-semibold"
                           }
                         >
-                          {to1(gains[i])}
+                          {fmtSigned(gains[i])}
                         </td>
                         <td>{holeType(i)}</td>
                       </tr>
@@ -1955,10 +1986,7 @@
               )}
 
               {view === "event" && (
-                <EventScreen
-                  computed={computed}
-                  setView={setView}
-                />
+                <EventScreen computed={computed} setView={setView} />
               )}
 
               {view === "ratings" && (
@@ -1980,17 +2008,11 @@
               )}
 
               {view === "standings" && (
-                <Standings
-                  season={season}
-                  setView={setView}
-                />
+                <Standings season={season} setView={setView} />
               )}
 
               {view === "eclectic" && (
-                <Eclectic
-                  season={season}
-                  setView={setView}
-                />
+                <Eclectic season={season} setView={setView} />
               )}
             </div>
           </div>
