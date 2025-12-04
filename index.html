@@ -769,10 +769,15 @@
         const finalPlayers = cleaned.map((p) => {
           const card = holeData[p.name] || {};
           const hcapCard = card.hcapCard;
-          let handicap = Number.isFinite(p.handicap) ? p.handicap : NaN;
 
-          if (!Number.isFinite(handicap) || handicap <= 0) {
-            handicap = Number.isFinite(hcapCard) ? hcapCard : 0;
+          // ✅ Prefer playing handicap from the Stableford card
+          let handicap;
+          if (Number.isFinite(hcapCard) && hcapCard > 0) {
+            handicap = hcapCard;
+          } else if (Number.isFinite(p.handicap) && p.handicap > 0) {
+            handicap = p.handicap;
+          } else {
+            handicap = 0;
           }
 
           const ptsSummary = totals[p.name];
@@ -1045,7 +1050,9 @@
 
           for (const r of base) {
             if (used.has(r.idx)) continue;
-            const grpIdxs = base.filter((x) => x.points === r.points).map((x) => x.idx);
+            const grpIdxs = base
+              .filter((x) => x.points === r.points)
+              .map((x) => x.idx);
             grpIdxs.forEach((id) => used.add(id));
             groups.push(grpIdxs);
           }
